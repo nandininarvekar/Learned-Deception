@@ -1,0 +1,122 @@
+Final Project: Agentic AI for Everything
+Fall 2026
+
+Overview
+Use AI to investigate a specific research question or build a novel agentic application that addresses a meaningful problem. Start with a concrete question: What is missing today, and why is it worth working on as general-purpose agents become more capable?
+
+Work in a team of 2–3 students, choose one of the two tracks below, give a team presentation, and submit one ZIP file documenting your work.
+
+Milestone	Deadline or timing
+Register your team and project idea	Sunday, November 1, 2026, at 23:59:59 ET
+Team presentation	During the final two weeks of class
+Final ZIP submission	Sunday, December 13, 2026, at 23:59 ET
+The project is worth 25 base points, with up to 5 additional bonus points. Presentation, submission, and bonus scores are shared by teammates before any individual late penalties. Credit for reviewing other teams is earned individually.
+
+Choose a track
+Research track
+Investigate a specific, open research question related to AI. Identify the question, explain your approach, and present evidence that helps answer it. Papers discussed in class can serve as starting points.
+
+Possible directions include:
+
+Evaluations or benchmarks: Develop tasks and assessment criteria for a domain you care about, then evaluate agents or models on them.
+Agent methods: Investigate a planning, memory, or tool-use method and compare it with a suitable baseline, such as a general-purpose agent working on the same task.
+Human-agent interaction: Explore how people provide input to agents or receive and use their outputs. Or think about other way of interaction beyond just text.
+Agent simulation: Study behavior that emerges when agents interact in a controlled environment, e.g., a specific scenario.
+Learning from experience: Investigate whether an agent can improve on a specific task through experience or feedback.
+Questions from papers: Investigate an unanswered question raised by a paper discussed in class.
+Make the scope concrete. For example, “a self-evolving agent” leaves open what the agent will learn, how it will learn, and how you will measure improvement. A focused question makes your results easier to interpret.
+
+Application track
+Build a novel agentic application for a problem you consider meaningful or important. Novelty can come from the problem, the workflow, or the user experience.
+
+The application itself must have agentic features. Using AI to write an otherwise conventional project is not sufficient. Your application should let an AI agent take actions and carry out tasks within it. You can build an agent into the application or provide the data access, tools, and interfaces that let an existing agent such as Codex work with it.
+
+For example, consider our course platform. Using AI to build a website for the course would not, by itself, make the platform agentic. The platform also provides infrastructure through which an agent can access course records and perform course-management tasks. The instructor can give an agent instructions such as “Check who has not submitted this assignment,” “Waive late submission penalty for XX,” or “Send these students a reminder.” An agent such as Codex can then use the platform's data and interfaces to carry out those tasks on the instructor's behalf.
+
+This kind of integration also counts as an agentic application. The agent does not have to live inside your app as a built-in chatbot. Your contribution can be making the application useful and accessible to external agents, so users can direct meaningful actions through natural-language instructions. Explain what your integration enables and demonstrate the agent performing those actions.
+
+Simply adding a chatbot to your application offers very little novelty. A user could already ask a general-purpose agent such as Claude to read your project and answer questions about it. What is your project's delta compared with doing that? What can users accomplish with your application that they could not accomplish as effectively by using a general-purpose agent directly? Explain why your application needs to exist and demonstrate the additional value it provides in your presentation.
+
+Possible directions include:
+
+Personal workflows: Improve a task you regularly perform with agentic feature and demonstrate the benefit compared with your current approach.
+Customized software: Recreate software you use and add agentic capabilities that make specific tasks easier.
+Creative applications: Build an agent-driven game, storytelling experience, or creative tool that offers new ways to participate.
+Toolkits, education, or physical AI: Create tools, interactive learning materials, or systems that interact with physical devices.
+Explain who would use your application (could be just you), how they would benefit, and what it adds beyond asking a general-purpose agent directly. Consider your project's human delta: the value your ideas, decisions, and judgment add beyond what the agent would produce on its own.
+
+Choosing a strong project
+The following ideas need additional justification:
+
+A task an existing agent can complete with one or two prompts. A chatbot for BU's Shared Computing Cluster or a slide-generation workflow can be a project, but what remains unsolved by a general-purpose agent is almost zero.
+A method chosen without a clear reason. If you use multiple agents, explain why one agent is insufficient. If you propose a memory-compaction method, show how it improves on existing approaches. You should be able to justify every design choice you made.
+An overly broad or resource-intensive goal. Scope the work to the time and computing resources available. Pretraining, post-training, or fine-tuning may exceed those resources.
+For either track, explain whether you are addressing a temporary limitation of today's agents or a problem that will remain as agents improve.
+
+If you are unsure whether your project idea fits the scope of this assignment, feel free to contact the instructor by DM or during office hours.
+
+Tools and existing work
+You may use existing models, frameworks, and AI development tools. You may also extend a previous homework assignment or an existing research project. Grading will be based on your delta: the new contribution you make for this final project. Clearly distinguish what already existed from what you added, changed, or discovered, and provide evidence for that contribution.
+
+Form and register your team
+Register in the final-project teaming spreadsheet by November 1, 2026, at 23:59:59 ET.
+
+In Teaming Registration, use one row per team. Enter each member's name and UID and a one-sentence project idea.
+If you need teammates, use Find Teammates to post your name, a one-sentence idea, and the kinds of teammates you are looking for. Entries are visible to classmates. Contact potential teammates through Slack DMs, then register your confirmed team.
+Solo projects require instructor approval. There is a maximum of 10 solo students across the class, with priority given to unique ideas. DM the instructor with your project idea to request an exception, and register only after approval.
+Team presentation
+Each team gives one presentation during the final two weeks of class. The number of presentation sessions and the time available per team will be determined after registration, based on the number of registered teams. The tentative format is 8 minutes of presentation plus 5 minutes of Q&A (subject to change).
+
+All team members must be on stage during presentation. All members receive the same presentation score.
+
+If your project is suitable for a live demo, we expect you to demonstrate it running during the presentation. For example, if you built a system, show it performing the tasks or interactions that illustrate your contribution. If your project could clearly be demonstrated live but you show only slides or screenshots, you may receive a lower presentation score. This expectation applies when a live demo is feasible and appropriate for the project. A prerecorded video is acceptable when practical constraints prevent a live demo, for example, if your agentic application controls a robotic arm that is only available in your lab.
+
+Build your presentation around your project's strongest contribution. The following questions can help you prepare:
+
+Problem: What question or need are you addressing, and why does it matter?
+Contribution: What is new, and what does your work add beyond existing methods or agents?
+Approach: What did you build or investigate, and why did you make those choices?
+Evidence: Show the application, experiments, comparisons, or other results that support your claims.
+Limitations: Explain what remains unresolved and where your approach falls short.
+Be prepared to explain your work and answer questions about your choices and results.
+
+Final submission
+Submit one ZIP file per team by Sunday, December 13, 2026, at 23:59 ET. Include your source code and experimental results or demonstration evidence, as appropriate for your project, supporting what you described in your presentation. You may also include an optional README.
+
+Have one team member submit the ZIP through the Slack course agent. Include every team member's name and UID in the ZIP so the submission can be credited to the whole team.
+
+No formal report is required, and the README is optional. We will use AI to read your code and help us understand the project. If you include a README, write it yourself rather than using AI to generate a project summary. Focus on what you want us to know that our AI would not be able to infer from your submitted code and results.
+
+Most projects will receive all 10 submission points if the materials match what was described in the presentation.
+
+Late submissions
+The course's two late-submission exceptions remain available across all course submissions and apply individually to each team member. If you have an exception remaining, a late final ZIP uses one exception and your submission is graded without a late penalty.
+
+If you have exhausted your exceptions, each late day deducts 20% of the ZIP's 10-point maximum: 2 points per day from the ZIP score earned. Each started 24-hour period after the deadline counts as one late day.
+
+All team members share the same ZIP score before late penalties, but their final ZIP scores may differ if they have different numbers of remaining exceptions. The late penalty applies to the ZIP component only.
+
+Grading
+Component	Points	How credit is assigned
+Team presentation	10	Instructor and TA evaluation; shared by all team members
+Final ZIP	10	Shared score for submitted materials; late exceptions and penalties apply individually
+Reviewing other teams	5	1 point per completed session, capped at 5; completing all sessions earns the full 5 points
+Audience-rating bonus	Up to 5 additional points	Team's average audience rating on the 1–5 scale; shared by all team members
+The instructor and TA give one holistic presentation score, based on your project's strongest dimension:
+
+Novelty: What is new about your idea, method, or application?
+Importance: Why does the problem matter?
+Accomplishment: What did you achieve, and how compelling are your results or demonstration?
+Clarity: How well do you explain the work and answer questions?
+You do not need to excel in every dimension. We look for what stands out most in your project and use that strength to determine the score, rather than averaging separate scores across the four dimensions. Focus on making your strongest contribution clear and supporting it with evidence.
+
+Reviewing other teams
+For each other team's presentation, submit one overall rating from 1 to 5, guided by the criteria above. You may also leave an optional comment. You must not rate your own team.
+
+To receive individual review credit for a session, attend the full session and complete reviews for every team presenting in that session. You should not submit rating for your own team.
+
+You earn 1 point per completed session, up to 5 points. If you attend and complete the required reviews for all scheduled final-project presentation sessions, you receive the full 5 points. The session schedule will be announced after registration.
+
+These review points are not shared with your teammates. All teammates receive the same presentation score, ZIP score before late penalties, and audience-rating bonus, but their individual review scores can differ.
+
+Agentic AI for Everything · Boston University · Fall 2026
