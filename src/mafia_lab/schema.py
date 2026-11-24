@@ -9,10 +9,19 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class Claim(StrictModel):
+    """A checkable claim inside a public message: "I am the Detective" or "I investigated X: Mafia"."""
+    kind: Literal["role", "investigation"]
+    role: Literal["mafia", "detective", "villager"] | None = None
+    target_id: str | None = None
+    result: Literal["mafia", "non_mafia"] | None = None
+
+
 class Action(StrictModel):
     type: Literal["speak", "pass", "vote", "night_kill", "investigate", "no_action"]
     message: ShortText | None = None
     target_id: str | None = None
+    claim: Claim | None = None  # only with "speak"
 
 
 class Decision(StrictModel):
@@ -43,6 +52,19 @@ class Memory(StrictModel):
         return "\n".join(lines) + "\n"
 
 
+class TrustEntry(StrictModel):
+    player_id: str
+    stance: Literal["trust", "neutral", "suspect"]
+    reason: ShortText
+
+
+class Notebook(StrictModel):
+    """Private notes a player writes each night and reads during the next day (this game only)."""
+    trust: list[TrustEntry]
+    today_summary: ShortText
+    plan: ShortText
+
+
 class Start(StrictModel):
     seed: int = 7
     players: Literal[4, 6] = 6
@@ -52,6 +74,9 @@ class Start(StrictModel):
     delay: float = Field(default=0.3, ge=0, le=5)
     max_days: int = Field(default=5, ge=1, le=10)
     series: str = Field(default="demo", pattern=r"^[a-zA-Z0-9_-]{1,48}$")
+    # Nightly notebook: each living player reflects after every night. Keep the same setting
+    # across all conditions of an experiment.
+    notebook: bool = True
 
 
 class Envelope(StrictModel):

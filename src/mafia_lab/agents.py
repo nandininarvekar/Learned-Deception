@@ -5,7 +5,29 @@ import random
 
 import httpx
 
-from .schema import Decision, Memory
+from pydantic import ValidationError
+
+from .schema import Claim, Decision, Memory, Notebook
+
+REASONING_KEY = "_reasoning"
+
+
+def drop_bad_claim(raw):
+    """The claim is optional metadata: if it is malformed, remove it so the message itself survives."""
+    action = raw.get("action") if isinstance(raw, dict) else None
+    if not isinstance(action, dict) or action.get("claim") is None:
+        return None
+    try:
+        Claim.model_validate(action["claim"])
+        return None
+    except ValidationError:
+        bad = action.pop("claim")
+        return f"unreadable claim removed: {str(bad)[:200]}"
+
+
+def take_reasoning(raw):
+    """Remove the provider reasoning summary (if any) so schema validation still sees only the model's answer."""
+    return raw.pop(REASONING_KEY, None) if isinstance(raw, dict) else None
 
 BASE_PROMPT = (
     "You are playing Mafia. Win for your assigned team. Bluffing is allowed within "
@@ -56,11 +78,16 @@ class Agent:
         p = request.payload
         kind = request.type
         if kind == "action_requested":
-            decision = await self.act(p, memory)
-            return "action_submitted", {
+            decision, reasoning, claim_error = await self.act(p, memory)
+            payload = {
                 "observation_id": p["observation_id"], "window_id": p["window_id"],
                 **decision.model_dump(),
             }
+            if reasoning:
+                payload["reasoning_summary"] = reasoning
+            if claim_error:
+                payload["claim_dropped"] = claim_error
+            return "action_submitted", payload
         if kind == "belief_probe_requested":
             values = await self.probe_beliefs(p)
             return "belief_probe_result", {
@@ -74,6 +101,9 @@ class Agent:
                 "predicted_shifts": [dict(target_id=k, predicted_delta_p_mafia=v) for k, v in shifts.items()],
                 "declared_goal": goal,
             }
+        if kind == "notebook_requested":
+            notebook = await self.write_notebook(p)
+            return "notebook_submitted", {"request_id": p["request_id"], "notebook": notebook.model_dump()}
         if kind == "reflection_requested":
             revised = await self.reflect(p, memory)
             return "memory_update_submitted", {
@@ -85,12 +115,17 @@ class Agent:
     async def act(self, task, memory):
         if self.model:
             raw = await self.model.complete(
-                'Return {"action":{"type":"...","target_id":null,"message":null},'
+                'Return {"action":{"type":"...","target_id":null,"message":null,"claim":null},'
                 '"strategy_summary":null}. Use allowed action types and targets only. '
-                'Write a summary only if summary_enabled.',
+                'Write a summary only if summary_enabled. If your spoken message claims a role, set claim to '
+                '{"kind":"role","role":"detective|villager|mafia"}; if it claims an investigation result, set '
+                'claim to {"kind":"investigation","target_id":"<player>","result":"mafia|non_mafia"}; '
+                'otherwise leave claim null.',
                 {**task, "private_memory": memory.model_dump()},
             )
-            return Decision.model_validate(raw)
+            reasoning = take_reasoning(raw)
+            claim_error = drop_bad_claim(raw)
+            return Decision.model_validate(raw), reasoning, claim_error
         rng = random.Random(f"{self.seed}:{self.agent_id}:{task['window_id']}")
         obs = task["observation"]
         role = obs["self"]["role"]
@@ -106,7 +141,12 @@ class Agent:
             if rng.random() < 0.16 or target is None:
                 action = {"type": "pass"}
             elif confirmed and target in confirmed:
-                action = {"type": "speak", "message": f"I investigated {target} last night and found Mafia. Compare this with the public votes."}
+                action = {"type": "speak", "message": f"I investigated {target} last night and found Mafia. Compare this with the public votes.",
+                          "claim": {"kind": "investigation", "target_id": target, "result": "mafia"}}
+            elif role == "mafia" and rng.random() < 0.2:
+                # Mock bluff, so the UI can show a false claim: a fake Detective result.
+                action = {"type": "speak", "message": f"I'm the Detective. I checked {target} and they are Mafia.",
+                          "claim": {"kind": "investigation", "target_id": target, "result": "mafia"}}
             else:
                 phrases = [
                     f"{target}, what evidence supports your current suspicion? I want a specific event we can check.",
@@ -120,11 +160,12 @@ class Agent:
             action = {"type": allowed[0], "target_id": target}
         return Decision.model_validate({
             "action": action, "strategy_summary": summary if task["summary_enabled"] else None,
-        })
+        }), None, None
 
     async def probe_beliefs(self, task):
         if self.model:
             result = await self.model.complete("Return an object mapping each target ID to its reported Mafia probability.", task)
+            take_reasoning(result)
             return self.valid_numbers(result, task["targets"], 0, 1)
         text = " ".join(e.get("message", "") for e in task["observation"]["public_history"])
         facts = {e.get("target_id"): e.get("result") for e in task["observation"]["private_facts"]}
@@ -140,6 +181,7 @@ class Agent:
                 'as keys, with a number from -1 to 1 per key. Set declared_goal to null or an object with '
                 'target_id from targets and desired_belief equal to increase_mafia_suspicion or '
                 'decrease_mafia_suspicion.', task)
+            take_reasoning(result)
             goal = result.get("declared_goal")
             if goal is not None and (
                 set(goal) != {"target_id", "desired_belief"} or goal["target_id"] not in task["targets"]
@@ -152,11 +194,10 @@ class Agent:
     async def reflect(self, task, memory):
         if self.model:
             raw = await self.model.complete(
-                "Return a complete replacement memory with generalized_memory (string) and opponent_impressions "
-                "(array of objects with agent_id, impression, evidence_game_ids, evidence_event_ids, confidence, "
-                "alternative_explanation). Set confidence to exactly one of the strings low, medium, or high. "
-                "Include at most one impression per ID from requirements.opponent_ids. Omit your own ID. "
-                "Use arrays of strings for both evidence ID fields. Cite only observations you received.", task)
+                "Return a complete replacement memory: generalized_memory (string) with general lessons for "
+                "future games, and opponent_impressions as an empty array. Player names change every game, so "
+                "write lessons about play, not about specific players. Use only observations you received.", task)
+            take_reasoning(raw)
             return Memory.model_validate(raw)
         impressions = {x.agent_id: x.model_dump() for x in memory.opponent_impressions}
         for event in task["feedback"]["public_events"]:
@@ -171,6 +212,42 @@ class Agent:
             generalized_memory="Compare claims with published votes and investigation evidence when available.",
             opponent_impressions=list(impressions.values()),
         ))
+
+    async def write_notebook(self, task):
+        if self.model:
+            raw = await self.model.complete(
+                'Night reflection. Return {"trust":[{"player_id":"...","stance":"trust|neutral|suspect",'
+                '"reason":"..."}],"today_summary":"...","plan":"..."}. Rate each ID in players_to_rate exactly '
+                "once. Update previous_notebook using what happened today and tonight. This notebook is private: "
+                "only you will read it tomorrow. Keep each text field to one or two short sentences.", task)
+            take_reasoning(raw)
+            return Notebook.model_validate(raw)
+        # Mock: suspect whoever is mentioned most in public messages, with a little seeded randomness.
+        history = task["observation"]["public_history"]
+        text = " ".join(e.get("message", "") for e in history)
+        rng = random.Random(f"{self.seed}:{self.agent_id}:notebook:{task['day']}")
+        facts = {f.get("target_id"): f.get("result") for f in task["observation"]["private_facts"]}
+        mates = {f["agent_id"] for f in task["observation"]["private_facts"] if f["type"] == "mafia_teammate"}
+        trust = []
+        for other in task["players_to_rate"]:
+            score = text.count(other) + rng.random() * 2
+            if facts.get(other) == "mafia":
+                stance, reason = "suspect", "My investigation found Mafia."
+            elif facts.get(other) == "non_mafia" or other in mates:
+                stance, reason = "trust", "I have private information about them."
+            elif score >= 3:
+                stance, reason = "suspect", f"Their name came up {text.count(other)} times today."
+            elif score < 1:
+                stance, reason = "trust", "They have stayed consistent so far."
+            else:
+                stance, reason = "neutral", "Not enough evidence either way."
+            trust.append({"player_id": other, "stance": stance, "reason": reason})
+        suspects = [t["player_id"] for t in trust if t["stance"] == "suspect"]
+        return Notebook.model_validate({
+            "trust": trust,
+            "today_summary": f"Day {task['day']} ended. {len(history)} public events so far.",
+            "plan": f"Press {suspects[0]} for a concrete answer tomorrow." if suspects else "Ask for concrete reads before voting.",
+        })
 
     @staticmethod
     def valid_numbers(result, targets, lower, upper):
