@@ -51,13 +51,18 @@ async def run(args, directory):
         try:
             ready = await model.complete('Return exactly {"ready":true}.', {})
             if ready.get("ready") is not True:
-                raise ValueError("Luna preflight returned unexpected JSON.")
+                raise ValueError("Codex preflight returned unexpected JSON.")
         except (CodexProviderError, ValueError, asyncio.TimeoutError) as error:
             reason = error.code if isinstance(error, CodexProviderError) else type(error).__name__
             state = "quota_exhausted" if model.quota_exhausted else "preflight_failed"
-            engine.write_json(directory / "status.json", {"state": state, "error": reason})
-            print(f"{state}: {reason}", flush=True)
+            detail = str(error) or "Codex preflight timed out"
+            engine.write_json(directory / "status.json", {"state": state, "error": reason, "detail": detail})
+            print(f"{state}: {reason} — {detail}", flush=True)
+            if reason == "MODEL_UNAVAILABLE":
+                return 3
             return 0 if model.quota_exhausted else 2
+
+        print(f"Preflight passed ({model.model}). Starting 12-player training.", flush=True)
 
     unhealthy = 0
     completed_this_run = 0
