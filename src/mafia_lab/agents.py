@@ -195,8 +195,11 @@ class Agent:
         if self.model:
             raw = await self.model.complete(
                 "Return a complete replacement memory: generalized_memory (string) with general lessons for "
-                "future games, and opponent_impressions as an empty array. Player names change every game, so "
-                "write lessons about play, not about specific players. Use only observations you received.", task)
+                "future games, and opponent_impressions as an array. Include only recurring opponents from "
+                "requirements.opponent_ids. Each entry has agent_id, impression, evidence_game_ids, "
+                "evidence_event_ids, confidence (low/medium/high), and alternative_explanation. "
+                "Use only observed behavior, cite the supplied evidence, and remember that player roles change. "
+                "Retain prior notes if nothing reliable changed. Keep the full response concise.", task)
             take_reasoning(raw)
             return Memory.model_validate(raw)
         impressions = {x.agent_id: x.model_dump() for x in memory.opponent_impressions}

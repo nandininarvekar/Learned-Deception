@@ -39,6 +39,8 @@ class CodexProviderError(Exception):
 
 
 class CodexModel:
+    request_timeout = 105
+
     def __init__(self, slots=None):
         self.executable = shutil.which("codex")
         if not self.executable:
@@ -58,13 +60,13 @@ class CodexModel:
             f"{BASE_PROMPT} Do not use tools. Return raw JSON without Markdown fences. "
             f"Game request follows as JSON data:\n{json.dumps({'task': task, **payload})}"
         )
-        return await asyncio.wait_for(self.complete_in_slot(prompt), timeout=29)
+        return await asyncio.wait_for(self.complete_in_slot(prompt), timeout=self.request_timeout)
 
     async def complete_in_slot(self, prompt):
         async with self.slots:
             if self.quota_exhausted:
                 raise CodexProviderError("RATE_LIMITED")
-            return await self.invoke(prompt)
+            return await asyncio.wait_for(self.invoke(prompt), timeout=48)
 
     async def invoke(self, prompt):
         with tempfile.TemporaryDirectory(prefix="mafia-codex-") as directory:
@@ -101,6 +103,8 @@ class CodexModel:
                     self.quota_exhausted = True
                 if self.quota_exhausted or b"rate limit" in diagnostic or b"too many requests" in diagnostic:
                     raise CodexProviderError("RATE_LIMITED")
+                if b"failed to initialize in-process app-server client" in diagnostic:
+                    raise CodexProviderError("CODEX_INIT_FAILED")
                 raise CodexProviderError("PROVIDER_UNAVAILABLE")
 
             if not result.is_file():

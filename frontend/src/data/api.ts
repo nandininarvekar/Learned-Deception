@@ -10,7 +10,7 @@ export interface GameSummary {
 
 export interface StartOptions {
   provider: "mock" | "openrouter" | "codex";
-  players: 4 | 6;
+  players: 4 | 8 | 12;
   showcase: boolean;
   delay: number;
 }
