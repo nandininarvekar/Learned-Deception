@@ -8,6 +8,7 @@ import { SuspicionGraph } from "./components/SuspicionGraph";
 import { PlayerCard } from "./components/PlayerCards";
 import { SidePanel } from "./components/SidePanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { CaseFiles, NewCase } from "./components/NewCase";
 
 function readHash() {
   const id = location.hash.replace(/^#/, "");
@@ -81,6 +82,11 @@ export function App() {
         status={status}
         spectator={spectator}
         phaseLabel={state.phaseLabel}
+        day={state.day}
+        phase={state.phase}
+        round={state.round}
+        provider={state.provider}
+        showcase={state.showcase}
         winner={state.winner}
         defaulted={state.defaultedCount}
         claimsDropped={state.claimsDropped}
@@ -96,11 +102,10 @@ export function App() {
 
       {!gameId ? (
         <div className="empty-state">
-          <h2>Start a game or choose a past one</h2>
-          <p className="muted">
-            Mock agents cost nothing and are good for trying the views. Showcase games include belief probes, so the
-            suspicion graph has data.
-          </p>
+          <section className="panel" style={{ flex: "999 1 560px" }}>
+            <NewCase onStart={start} />
+          </section>
+          <CaseFiles games={games} onSelect={(id, done) => select(id, done)} onRefresh={refresh} />
         </div>
       ) : (
         <>

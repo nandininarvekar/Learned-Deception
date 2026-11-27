@@ -13,13 +13,31 @@ const LAYER_NOTE: Record<Layer, string> = {
   KNOWS: "ground truth",
 };
 
+// Plain-language title for each layer. The layer itself stays in the tooltip.
+const LAYER_TITLE: Record<Layer, string> = {
+  THINKS: "Strategy note",
+  NOTES: "Private notebook",
+  REASONS: "Reasoning summary",
+  BELIEVES: "Suspects most",
+  SAYS: "Said out loud",
+  DOES: "Last action",
+  WANTS: "Trying to",
+  KNOWS: "Secretly knows",
+};
+
+// Rows only shown with the spectator lamp on: players in the game never see these.
+const SECRET: Layer[] = ["THINKS", "NOTES", "REASONS", "BELIEVES", "WANTS", "KNOWS"];
+
 function Row({ layer, children, fresh }: { layer: Layer; children: React.ReactNode; fresh?: boolean }) {
   return (
     <div className={"card-row" + (fresh ? " fresh" : "")}>
-      <span className={`layer layer-${layer.toLowerCase()}`} title={LAYER_NOTE[layer]}>
-        {layer}
-      </span>
-      <div className="card-value">{children}</div>
+      <div className="row-head">
+        <span className={`layer layer-${layer.toLowerCase()}`} title={`${layer}: ${LAYER_NOTE[layer]}`}>
+          {LAYER_TITLE[layer]}
+        </span>
+        {SECRET.includes(layer) && <span className="secret" title="Only visible with the spectator lamp on">lamp</span>}
+      </div>
+      <div className={"card-value" + (layer === "SAYS" ? " says-value" : "")}>{children}</div>
     </div>
   );
 }
@@ -35,7 +53,7 @@ export function PlayerCard({ v, spectator, cursor }: { v: PlayerView; state: Gam
       <header>
         <span className="dot" style={{ background: v.role ? ROLE_COLOR[v.role] : "var(--seat)" }} />
         <strong>{displayName(v.id)}</strong>
-        {v.role && <span className="role-chip">{ROLE_LABEL[v.role] ?? v.role}</span>}
+        {v.role && <span className={"role-chip " + v.role}>{ROLE_LABEL[v.role] ?? v.role}</span>}
         <span className="status">{v.alive ? "alive" : "out"}</span>
       </header>
 
@@ -82,7 +100,7 @@ export function PlayerCard({ v, spectator, cursor }: { v: PlayerView; state: Gam
         <Row layer="BELIEVES">
           {v.topSuspect ? (
             <>
-              Most suspects <b>{displayName(v.topSuspect.target)}</b> ({Math.round(v.topSuspect.p * 100)}%)
+              <b>{displayName(v.topSuspect.target)}</b> ({Math.round(v.topSuspect.p * 100)}%) · reported when asked
             </>
           ) : (
             <Empty />
@@ -123,7 +141,7 @@ export function PlayerCard({ v, spectator, cursor }: { v: PlayerView; state: Gam
           .slice(-2)
           .map((c) => (
             <div key={c.index} className="flag" title="Checked exactly against the true roles and investigation results">
-              ⚠ False claim: {c.text}. {c.knewFalse ? "They know this is false." : ""}
+              ⚠ False claim (checked by the game): {c.text}. {c.knewFalse ? "They know this is false." : ""}
             </div>
           ))}
       {spectator && (v.silentTurns > 0 || v.defaulted > 0) && (
