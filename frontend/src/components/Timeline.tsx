@@ -47,6 +47,7 @@ export function Timeline(props: Props) {
 
   return (
     <div className="timeline">
+      <span className="tape-label">Case tape</span>
       <button
         className="play"
         disabled={!events.length}
@@ -58,10 +59,10 @@ export function Timeline(props: Props) {
           onPlaying(true);
         }}
       >
-        {playing ? "❚❚" : "▶"}
+        {playing ? "❚❚ Pause" : "▶ Play"}
       </button>
       <button className="ghost" onClick={() => { pause(); onCursor(0); }} disabled={!events.length} title="Back to start">
-        ⏮
+        ⏮ Start
       </button>
       <div className="track">
         <input
@@ -89,6 +90,14 @@ export function Timeline(props: Props) {
             />
           ))}
         </div>
+        <div className="tape-legend" aria-hidden="true">
+          <span>Marks on the tape:</span>
+          <span><i style={{ background: "var(--accent)" }} />talk</span>
+          <span><i style={{ background: "var(--vote)" }} />vote</span>
+          <span><i style={{ background: "#6b7bd6" }} />night</span>
+          <span><i style={{ background: "var(--mafia)" }} />game over</span>
+          <span>· Rewinding is a replay, it never changes the game.</span>
+        </div>
       </div>
       {running && (
         <button
@@ -104,7 +113,7 @@ export function Timeline(props: Props) {
         </button>
       )}
       <button className="ghost" onClick={() => { pause(); onCursor(events.length); }} title="Skip to the latest event">
-        ⏭
+        Latest ⏭
       </button>
       <label className="inline">
         Speed
@@ -116,9 +125,10 @@ export function Timeline(props: Props) {
           ))}
         </select>
       </label>
-      <span className="muted count">
+      <span className="muted count" title="Events shown / events so far">
         {Math.min(cursor, events.length)} / {events.length}
       </span>
+
     </div>
   );
 }

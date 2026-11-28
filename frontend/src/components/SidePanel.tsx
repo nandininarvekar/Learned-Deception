@@ -9,8 +9,8 @@ import { ErrorBoundary } from "./ErrorBoundary";
 
 type Tab = "transcript" | "players" | "charts" | "debug";
 const TABS: { id: Tab; label: string; spectatorOnly?: boolean }[] = [
-  { id: "transcript", label: "Transcript" },
-  { id: "players", label: "Players" },
+  { id: "transcript", label: "Case log" },
+  { id: "players", label: "Suspects" },
   { id: "charts", label: "Over time", spectatorOnly: true },
   { id: "debug", label: "Debug", spectatorOnly: true },
 ];
@@ -41,6 +41,8 @@ export function SidePanel({ state, transcript, cursor, spectator, invalid, onJum
           </button>
         ))}
       </nav>
+      {tab === "transcript" && <p className="tab-hint">Click a line to rewind the tape to that moment.</p>}
+      {tab === "players" && <p className="tab-hint">Every player's file. Click a seat on the table to open just one.</p>}
       <div className="tab-body">
         <ErrorBoundary name={tab}>
           {tab === "transcript" && <Transcript items={transcript} cursor={cursor} onJump={onJump} />}
