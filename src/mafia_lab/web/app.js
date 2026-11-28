@@ -1,10 +1,10 @@
 const element = (id) => document.getElementById(id);
-const ui = Object.fromEntries(["start","seed","learning","replay","spectator","pause","error","status",
+const ui = Object.fromEntries(["start","seed","playerCount","learning","replay","spectator","pause","error","status",
   "seats","phase","result","transcript","count","strategies","matrix","memory","insights"].map(id => [id, element(id)]));
-const defaultPlayers = "ABCDEF".split("").map(x => "agent_" + x);
+const defaultPlayers = ["Emeka", "Farah", "Gita", "Hugo", "Ines", "Jonas", "Kai", "Lena"];
 let gameId, socket, generation = 0, isPaused = false, isDone = true, received = [];
 let retryTimer;
-const name = id => id ? "Player " + id.split("_").at(-1) : "Abstain";
+const name = id => id ? (id.startsWith("agent_") ? "Player " + id.split("_").at(-1) : id) : "Abstain";
 function node(tag, text, className) {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -43,7 +43,7 @@ function render() {
   ui.seats.replaceChildren(...players.map(id => {
     const card = node("div", undefined, "seat" + (eliminated.has(id) ? " dead" : ""));
     const role = roles[id];
-    card.append(node("div",id.at(-1),"avatar"),node("strong",name(id)),
+    card.append(node("div",name(id).slice(0, 2),"avatar"),node("strong",name(id)),
       node("div",(role ? role + " · " : "") + (eliminated.has(id) ? "Out" : "Alive"),"role " + (role || "")));
     return card;
   }));
@@ -93,11 +93,11 @@ function render() {
     return;
   }
   const table = node("table"), head = node("tr");
-  head.append(node("th","From / To"), ...players.map(id => node("th",id.at(-1))));
+  head.append(node("th","From / To"), ...players.map(id => node("th",name(id).slice(0, 2))));
   table.append(head);
   for (const id of players) {
     const row = node("tr");
-    row.append(node("th",id.at(-1)));
+    row.append(node("th",name(id).slice(0, 2)));
     for (const target of players) {
       const value = beliefs.get(id)?.find(e => e.target_id === target)?.p_mafia;
       const cell = node("td",value === undefined ? "–" : Math.round(value*100)+"%");
@@ -156,7 +156,7 @@ function setupLive() {
     showError();
     try {
       const data = await request("/api/games",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({seed:Number(ui.seed.value),learning:ui.learning.value})});
+        body:JSON.stringify({seed:Number(ui.seed.value),players:Number(ui.playerCount.value),learning:ui.learning.value})});
       isPaused = false;
       ui.pause.textContent = "Pause";
       connect(data.game_id);

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -33,12 +34,37 @@ def reasoning_text(stdout):
 
 
 class CodexProviderError(Exception):
-    def __init__(self, code):
-        super().__init__(code)
+    def __init__(self, code, detail=""):
+        super().__init__(detail or code)
         self.code = code
 
 
+def failure_detail(events, stderr, returncode):
+    messages = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if isinstance(event, dict) and event.get("type") in {"error", "turn.failed"}:
+            error = event.get("error", event)
+            message = error.get("message") if isinstance(error, dict) else error
+            if isinstance(message, str) and message.strip():
+                messages.append(message)
+    if messages:
+        detail = messages[-1]
+    else:
+        lines = stderr.decode("utf-8", "replace").splitlines()
+        errors = [line for line in lines if "error" in line.lower() or "failed" in line.lower()]
+        detail = (errors or lines or [f"Codex exited with status {returncode}"])[-1]
+    detail = re.sub(r"(?i)bearer\s+[\w./+=-]+|sk-[\w-]+", "[redacted]", detail)
+    detail = re.sub(r"https?://[^\s]+", "[endpoint]", detail)
+    return " ".join(detail.split())[:600]
+
+
 class CodexModel:
+    request_timeout = 105
+
     def __init__(self, slots=None):
         self.executable = shutil.which("codex")
         if not self.executable:
@@ -58,13 +84,13 @@ class CodexModel:
             f"{BASE_PROMPT} Do not use tools. Return raw JSON without Markdown fences. "
             f"Game request follows as JSON data:\n{json.dumps({'task': task, **payload})}"
         )
-        return await asyncio.wait_for(self.complete_in_slot(prompt), timeout=29)
+        return await asyncio.wait_for(self.complete_in_slot(prompt), timeout=self.request_timeout)
 
     async def complete_in_slot(self, prompt):
         async with self.slots:
             if self.quota_exhausted:
                 raise CodexProviderError("RATE_LIMITED")
-            return await self.invoke(prompt)
+            return await asyncio.wait_for(self.invoke(prompt), timeout=48)
 
     async def invoke(self, prompt):
         with tempfile.TemporaryDirectory(prefix="mafia-codex-") as directory:
@@ -77,13 +103,14 @@ class CodexModel:
                     "--disable", "hooks", "-c", 'web_search="disabled"',
                     "-c", f'model_reasoning_effort="{self.effort}"',
                     "-c", f'model_reasoning_summary="{self.summary}"',
-                    "--sandbox", "read-only", "--model", self.model,
+                    "--sandbox", "read-only",
+                    *(("--model", self.model) if self.model != "cli-default" else ()),
                     "--json", "--output-last-message", str(result), "-",
                     cwd=directory, stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
             except OSError as error:
-                raise CodexProviderError("PROVIDER_UNAVAILABLE") from error
+                raise CodexProviderError("PROVIDER_UNAVAILABLE", error.strerror) from error
 
             try:
                 events, stderr = await process.communicate(prompt.encode("utf-8"))
@@ -96,12 +123,17 @@ class CodexModel:
                     await process.wait()
 
             if process.returncode:
+                detail = failure_detail(events, stderr, process.returncode)
                 diagnostic = (events + stderr).lower()
                 if b"usage limit" in diagnostic or b"usage_limit_reached" in diagnostic:
                     self.quota_exhausted = True
                 if self.quota_exhausted or b"rate limit" in diagnostic or b"too many requests" in diagnostic:
-                    raise CodexProviderError("RATE_LIMITED")
-                raise CodexProviderError("PROVIDER_UNAVAILABLE")
+                    raise CodexProviderError("RATE_LIMITED", detail)
+                if b"model_not_in_accessible_catalog" in diagnostic or b"model_not_found" in diagnostic:
+                    raise CodexProviderError("MODEL_UNAVAILABLE", detail)
+                if b"failed to initialize in-process app-server client" in diagnostic:
+                    raise CodexProviderError("CODEX_INIT_FAILED", detail)
+                raise CodexProviderError("PROVIDER_UNAVAILABLE", detail)
 
             if not result.is_file():
                 raise ValueError("Missing final JSON response from Codex")
