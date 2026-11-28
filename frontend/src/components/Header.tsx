@@ -14,6 +14,7 @@ interface Props {
   round: number | null;
   provider?: string;
   showcase?: boolean;
+  rounds: number;
   winner: string | null | undefined;
   defaulted: number;
   claimsDropped: number;
@@ -157,7 +158,7 @@ export function Header(props: Props) {
       {props.gameId && (
         <div className="status-line">
           <span className={`pill pill-${props.status}`}>{STATUS_LABEL[props.status]}</span>
-          <PhaseSteps day={props.day} phase={props.phase} round={props.round} label={props.phaseLabel} finished={props.winner !== undefined} />
+          <PhaseSteps day={props.day} phase={props.phase} round={props.round} label={props.phaseLabel} finished={props.winner !== undefined} rounds={props.rounds} />
           <span className="spacer" />
           {props.provider && (
             <span className="pill pill-info" title="Recorded when the game started">

@@ -10,13 +10,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agents import Model
-from .codex_model import CodexModel
+from .codex_model import CONCURRENCY, CodexModel
 from .game import Game, RUNS
 from .schema import Start
 
 games = {}
 tasks = {}
-codex_slots = asyncio.Semaphore(6)
+codex_slots = asyncio.Semaphore(CONCURRENCY)  # shared by every Codex game on this server
 web = Path(__file__).with_name("web")
 
 

@@ -8,7 +8,7 @@ The three modes have separate, stable cohorts. Role assignments are seeded and c
 | 8 | 2 | 1 | 5 |
 | 12 | 3 | 1 | 8 |
 
-Discussion, voting, night kills, investigations, and win conditions use the existing rules. Each recurring identity keeps its own lessons and opponent impressions, scoped to series, provider, condition, cohort, and role. The game notebook is private and resets each game. Existing six-player logs can still be opened as replays.
+Each day starts with a night (Mafia kill, Detective investigation), then three discussion rounds in which players speak one at a time and each sees the messages before their turn, then a vote. A tied vote goes to a runoff between the tied players; if the runoff also ties, the game seed picks one of them. The day limit depends on the size (4 players: 3 days, 8: 6, 12: 8) unless `--max-days` sets it. Each recurring identity keeps its own lessons and opponent impressions, scoped to series, provider, condition, cohort, and role. The game notebook is private and resets each game. Existing six-player logs can still be opened as replays.
 
 ## Live training
 
@@ -29,7 +29,7 @@ PYTHONPATH=src python3 -m mafia_lab.train --provider mock --series 12p-smoke --l
 PYTHONPATH=src python3 -m mafia_lab.train --provider mock --series 12p-smoke --learning all --games 20
 ```
 
-Both runs used seeds 1000–1019 and a five-day cap, with showcase and notebook probes disabled. The mock policy ignores learned memory when choosing moves, so matching game outcomes are expected. This comparison verifies persistence and measurement. A learning-effect estimate requires model-driven games and a held-out evaluation.
+These two runs predate the rule changes above (night first, turn-taking, runoff votes, size-based day limits). Both used seeds 1000–1019 and a five-day cap, with showcase and notebook probes disabled. The mock policy ignores learned memory when choosing moves, so matching game outcomes are expected. This comparison verifies persistence and measurement. A learning-effect estimate requires model-driven games and a held-out evaluation.
 
 | Condition | Games | Mafia wins | Villager wins | Draws | Defaulted actions | Memory updates |
 |---|---:|---:|---:|---:|---:|---:|

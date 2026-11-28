@@ -94,3 +94,23 @@ describe("meanSuspicion", () => {
     expect(meanSuspicion({}, "B")).toBeNull();
   });
 });
+
+describe("runoff votes", () => {
+  it("labels a tie, the runoff, and a random tie-break", () => {
+    const at = (type: string, extra: object) => ({ ...raw[0], event_id: `evt_${type}_${Math.random()}`, type, phase: "day_vote", ...extra });
+    const players = raw[0].players as string[];
+    const [a, b, c, d] = players;
+    const vote = (t: string) => ({ target_id: t, forced: false });
+    const extra = [
+      at("vote_results", { votes: [{ actor_id: c, ...vote(a) }, { actor_id: d, ...vote(b) }], eliminated_player_id: null, runoff_candidates: [a, b] }),
+      at("vote_results", { votes: [{ actor_id: c, ...vote(a) }, { actor_id: d, ...vote(b) }], eliminated_player_id: a, runoff: true, tie_break: "random" }),
+    ].map((e) => parseEvent(e)).flatMap((r) => (r.ok ? [r.event] : []));
+    expect(extra).toHaveLength(2);
+    const all = [events[0], ...extra];
+    const items = deriveState(all, all.length, false).transcript.filter((t) => t.kind === "vote");
+    expect(items[0].title).toBe("Vote");
+    expect(items[0].text).toContain("tie: runoff between");
+    expect(items[1].title).toBe("Runoff vote");
+    expect(items[1].text).toContain("picked at random");
+  });
+});

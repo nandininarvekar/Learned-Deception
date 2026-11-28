@@ -54,6 +54,12 @@ export function PlayerCard({ v, spectator, cursor }: { v: PlayerView; state: Gam
         <span className="dot" style={{ background: v.role ? ROLE_COLOR[v.role] : "var(--seat)" }} />
         <strong>{displayName(v.id)}</strong>
         {v.role && <span className={"role-chip " + v.role}>{ROLE_LABEL[v.role] ?? v.role}</span>}
+        {spectator && v.persona && (
+          <span className="role-chip" title="Opponent personality, assigned for this game only (private)">{v.persona}</span>
+        )}
+        {spectator && v.learner && (
+          <span className="role-chip" title="The agent under study: it plays without a personality">learning agent</span>
+        )}
         <span className="status">{v.alive ? "alive" : "out"}</span>
       </header>
 

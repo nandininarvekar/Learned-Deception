@@ -34,8 +34,14 @@ const schemas = {
     provider: z.string(),
     learning: z.string(),
     showcase: z.boolean(),
+    discussion_rounds: z.number().optional(), // older logs: 3
   }),
   roles_assigned: base.extend({ roles: z.record(z.string()) }),
+  setup_details: base.extend({
+    learners: z.array(z.string()),
+    personas: z.record(z.string()),
+    condition: z.string().nullable(),
+  }),
   phase_changed: base.extend({ living_players: z.array(z.string()) }),
   public_message: base.extend({
     actor_id: z.string(),
@@ -79,7 +85,13 @@ const schemas = {
     source_event_ids: z.array(z.string()),
     probabilities: z.array(probability),
   }),
-  vote_results: base.extend({ votes: z.array(vote), eliminated_player_id: z.string().nullable() }),
+  vote_results: base.extend({
+    votes: z.array(vote),
+    eliminated_player_id: z.string().nullable(),
+    runoff_candidates: z.array(z.string()).optional(), // a tie: these players go to a runoff
+    runoff: z.boolean().optional(), // this is the runoff vote
+    tie_break: z.string().nullable().optional(), // "random": the runoff tied too, the seed picked
+  }),
   player_eliminated: base.extend({ player_id: z.string(), cause: z.string() }),
   night_kill: base.extend({ actor_id: z.string(), target_id: z.string() }),
   investigation_result: base.extend({

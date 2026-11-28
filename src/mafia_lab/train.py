@@ -1,4 +1,4 @@
-"""Resumable 12-seat training. Runs use separate series directories and stop on quota."""
+"""Resumable training (8 players by default, 12 for final runs). Runs use separate series directories and stop on quota."""
 import argparse
 import asyncio
 import fcntl
@@ -28,6 +28,9 @@ def summarize(game, attempt, state):
         "false_mafia_claims": sum(e["type"] == "claim_checked" and not e["literal_truth"]
                                   and roles[e["actor_id"]] == "mafia" for e in events),
         "town_votes_for_mafia": sum(mafia_votes), "town_votes_cast": len(mafia_votes),
+        "runoffs": sum(1 for e in events if e["type"] == "vote_results" and e.get("runoff")),
+        "random_tie_breaks": sum(1 for e in events if e["type"] == "vote_results" and e.get("tie_break")),
+        "usage": game.usage(),
         "model_errors": dict(Counter(
             e["response"]["payload"]["error"]["code"]
             for e in events if e["type"] == "protocol_exchange" and e["response"]["type"] == "request_failed"
@@ -39,8 +42,9 @@ async def run(args, directory):
     journal = directory / "progress.jsonl"
     rows = [json.loads(line) for line in journal.read_text().splitlines()] if journal.exists() else []
     model = CodexModel() if args.provider == "codex" else None
-    config = Start(players=12, provider=args.provider, series=args.series, learning=args.learning,
-                   max_days=args.max_days, seed=args.seed, delay=0, notebook=args.notebook, showcase=False)
+    config = Start(players=args.players, discussion_rounds=args.rounds, provider=args.provider, series=args.series, learning=args.learning,
+                   max_days=args.max_days, seed=args.seed, delay=0, notebook=args.notebook, showcase=False,
+                   condition=args.condition, personas=args.personas, belief_checks=args.belief_checks)
     manifest = {"config": config.model_dump(), "model": getattr(model, "model", None),
                 "effort": getattr(model, "effort", None)}
     config_file = directory / "config.json"
@@ -62,7 +66,7 @@ async def run(args, directory):
                 return 3
             return 0 if model.quota_exhausted else 2
 
-        print(f"Preflight passed ({model.model}). Starting 12-player training.", flush=True)
+        print(f"Preflight passed ({model.model}). Starting {args.players}-player training.", flush=True)
 
     unhealthy = 0
     completed_this_run = 0
@@ -108,10 +112,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=("mock", "codex"), default="codex")
     parser.add_argument("--series", default="luna-12")
-    parser.add_argument("--learning", choices=("off", "all"), default="all")
+    parser.add_argument("--learning", choices=("off", "one_mafia", "all"), default="all")
+    parser.add_argument("--condition", choices=("c0", "c2", "irrelevant", "neutral_summary"), default="c2",
+                        help="What the learning Mafia agent carries between games (with --learning one_mafia)")
+    parser.add_argument("--personas", choices=("off", "training", "heldout"), default="training")
+    parser.add_argument("--belief-checks", choices=("off", "per_day", "per_round", "per_mafia_message"), default="per_day",
+                        help="Training games check beliefs once a day; use per_round or per_mafia_message to evaluate")
+    parser.add_argument("--players", type=int, choices=(4, 8, 12), default=8,
+                        help="8 for development and pilots, 12 for final runs")
+    parser.add_argument("--rounds", type=int, choices=(1, 2, 3), default=2, help="Discussion rounds per day")
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--games", type=int)
-    parser.add_argument("--max-days", type=int, default=5)
+    parser.add_argument("--max-days", type=int, default=None,
+                        help="Day limit; default depends on the game size (12 players: 8 days)")
     parser.add_argument("--notebook", action="store_true")
     args = parser.parse_args()
     if args.games is not None and args.games <= 0:
@@ -120,6 +133,8 @@ def main():
         parser.error("mock experiments require a finite --games value")
     Start(series=args.series, max_days=args.max_days)
     directory = engine.RUNS / "training" / args.series / args.provider / args.learning
+    if args.learning == "one_mafia":
+        directory = directory / args.condition
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "training.lock").open("a") as lock:
         try:

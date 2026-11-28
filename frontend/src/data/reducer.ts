@@ -44,6 +44,8 @@ export interface PlayerView {
   notes?: NotebookView; // private notebook written last night, read during the next day
   knows: string[];
   topSuspect?: { target: string; p: number };
+  persona?: string; // opponent personality, e.g. "cautious" (spectator only)
+  learner?: boolean; // the agent under study
   claims: CheckedClaim[]; // structured claims checked against the true game state (spectator only)
   silentTurns: number;
   defaulted: number;
@@ -71,6 +73,7 @@ export interface GameState {
   players: string[];
   provider?: string;
   showcase?: boolean;
+  rounds: number; // discussion rounds per day (3 in older logs)
   roles: Record<string, string>;
   alive: Set<string>;
   day: number;
@@ -95,6 +98,7 @@ const PHASE_LABEL: Record<string, string> = {
   setup: "Setup",
   day_discussion: "Discussion",
   day_vote: "Voting",
+  day_runoff: "Runoff vote",
   night_action: "Night",
   night_notebook: "Night · notebooks",
   game_over: "Game over",
@@ -136,6 +140,7 @@ export function deriveState(events: GameEvent[], cursor: number, spectator: bool
     views: {},
     transcript: [],
     winner: undefined,
+    rounds: 3,
     defaultedCount: 0,
     claimsDropped: 0,
     beliefsJustUpdated: false,
@@ -153,11 +158,15 @@ export function deriveState(events: GameEvent[], cursor: number, spectator: bool
     state.cursorEvent = e;
 
     if (isType(e, "game_started")) {
+      state.rounds = e.discussion_rounds ?? 3;
       state.players = e.players;
       state.provider = e.provider;
       state.showcase = e.showcase;
       state.alive = new Set(e.players);
       e.players.forEach((p) => view(state, p));
+    } else if (isType(e, "setup_details")) {
+      for (const [p, name] of Object.entries(e.personas)) view(state, p).persona = name;
+      for (const p of e.learners) view(state, p).learner = true;
     } else if (isType(e, "roles_assigned")) {
       state.roles = e.roles;
       for (const [p, role] of Object.entries(e.roles)) {
@@ -289,10 +298,16 @@ export function deriveState(events: GameEvent[], cursor: number, spectator: bool
       state.transcript.push({
         index: i,
         kind: "vote",
-        title: "Vote",
+        title: e.runoff ? "Runoff vote" : "Vote",
         text:
           e.votes.map((v) => `${short(v.actor_id)}→${v.target_id ? short(v.target_id) : "∅"}`).join("  ") +
-          (e.eliminated_player_id ? "" : "  (tie: no elimination)"),
+          (e.runoff_candidates?.length
+            ? `  (tie: runoff between ${e.runoff_candidates.map(displayName).join(" and ")})`
+            : e.tie_break === "random"
+              ? "  (tied again: picked at random)"
+              : e.eliminated_player_id
+                ? ""
+                : "  (no elimination)"),
         privileged,
       });
     } else if (isType(e, "player_eliminated")) {
@@ -370,7 +385,7 @@ export function deriveState(events: GameEvent[], cursor: number, spectator: bool
       : state.day === 0
         ? "Waiting to start"
         : `Day ${state.day} · ${PHASE_LABEL[state.phase] ?? state.phase}` +
-          (state.phase === "day_discussion" && state.round ? ` ${state.round}/3` : "");
+          (state.phase === "day_discussion" && state.round ? ` ${state.round}/${state.rounds}` : "");
   return state;
 }
 

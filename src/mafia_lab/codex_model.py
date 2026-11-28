@@ -6,10 +6,25 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import time
+
 from .agents import BASE_PROMPT
+from .telemetry import prompt_hash, record
 
 
 REASONING_KEY = "_reasoning"
+
+
+def usage_of(stdout):
+    """Token counts from the `turn.completed` event of `codex exec --json`."""
+    for line in reversed(stdout.decode("utf-8", "replace").splitlines()):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "turn.completed":
+            return event.get("usage") or {}
+    return {}
 
 
 def reasoning_text(stdout):
@@ -62,8 +77,18 @@ def failure_detail(events, stderr, returncode):
     return " ".join(detail.split())[:600]
 
 
+# Fewer Codex processes at once: six in parallel made each call slower (median 14 s on Nov 27)
+# and pushed many past the time limit, so turns were lost to defaults.
+# Six caused slowdowns; five keeps parallel phases (belief checks, votes, notebooks) quick.
+CONCURRENCY = int(os.getenv("MAFIA_CODEX_CONCURRENCY") or 5)
+ATTEMPT_TIMEOUT = 60  # seconds for one Codex process
+ATTEMPTS = 2  # one retry after a timeout
+
+
 class CodexModel:
-    request_timeout = 105
+    # The real limit is per attempt (above). This outer limit is only a safety net and also covers
+    # waiting for a free slot: in a 12-player vote, 12 calls share CONCURRENCY slots.
+    request_timeout = 300
 
     def __init__(self, slots=None):
         self.executable = shutil.which("codex")
@@ -74,7 +99,8 @@ class CodexModel:
         self.effort = os.getenv("MAFIA_CODEX_EFFORT") or "low"
         # Ask Codex for the provider's reasoning summary (OpenAI never returns raw reasoning).
         self.summary = os.getenv("MAFIA_CODEX_REASONING_SUMMARY") or "auto"
-        self.slots = slots if slots is not None else asyncio.Semaphore(6)
+        self.slots = slots if slots is not None else asyncio.Semaphore(CONCURRENCY)
+        self.retries = 0  # timeouts recovered by a retry, for diagnostics
         self.quota_exhausted = False
 
     async def complete(self, task, payload):
@@ -84,13 +110,32 @@ class CodexModel:
             f"{BASE_PROMPT} Do not use tools. Return raw JSON without Markdown fences. "
             f"Game request follows as JSON data:\n{json.dumps({'task': task, **payload})}"
         )
-        return await asyncio.wait_for(self.complete_in_slot(prompt), timeout=self.request_timeout)
+        entry = dict(backend="codex", model=self.model, effort=self.effort,
+                     prompt_hash=prompt_hash(BASE_PROMPT, task))
+        started = time.monotonic()
+        try:
+            result, usage = await self.complete_in_slot(prompt)
+        except Exception as error:
+            record({**entry, "seconds": round(time.monotonic() - started, 2), "error": type(error).__name__})
+            raise
+        record({**entry, "seconds": round(time.monotonic() - started, 2),
+                "input_tokens": usage.get("input_tokens"), "cached_input_tokens": usage.get("cached_input_tokens"),
+                "output_tokens": usage.get("output_tokens"), "reasoning_tokens": usage.get("reasoning_output_tokens"),
+                "attempts": usage.get("attempts", 1)})
+        return result
 
     async def complete_in_slot(self, prompt):
         async with self.slots:
-            if self.quota_exhausted:
-                raise CodexProviderError("RATE_LIMITED")
-            return await asyncio.wait_for(self.invoke(prompt), timeout=48)
+            for attempt in range(ATTEMPTS):
+                if self.quota_exhausted:
+                    raise CodexProviderError("RATE_LIMITED")
+                try:
+                    result, usage = await asyncio.wait_for(self.invoke(prompt), timeout=ATTEMPT_TIMEOUT)
+                    return result, {**usage, "attempts": attempt + 1}
+                except asyncio.TimeoutError:
+                    if attempt == ATTEMPTS - 1:
+                        raise
+                    self.retries += 1
 
     async def invoke(self, prompt):
         with tempfile.TemporaryDirectory(prefix="mafia-codex-") as directory:
@@ -144,7 +189,7 @@ class CodexModel:
             if reasoning:
                 # Reserved key; agents.take_reasoning() removes it before validation.
                 response[REASONING_KEY] = reasoning
-            return response
+            return response, usage_of(events)
 
     async def aclose(self):
         # Each CLI process and its temporary directory are owned by one request.

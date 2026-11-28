@@ -7,11 +7,43 @@ from pathlib import Path
 
 import httpx
 
+from . import personas as persona_pool
 from .agents import Agent
 from .codex_model import CodexProviderError
-from .schema import Action, Decision, Envelope, Memory, Notebook
+from .schema import DEFAULT_MAX_DAYS, Action, Decision, Envelope, Memory, Notebook
+from .telemetry import CALLS
 
 RUNS = Path("runs")
+
+# What players need from a public event; the rest (timestamps, game id, visibility, internal ids)
+# only made every call longer. Calls grew from about 14,000 to 38,000 input tokens by day 5.
+DROP_FROM_HISTORY = {"game_id", "timestamp_utc", "visibility", "candidate_message_id", "phase"}
+
+
+def compact(event):
+    """A public event as players see it: same facts, fewer tokens."""
+    out = {k: v for k, v in event.items() if k not in DROP_FROM_HISTORY and v not in (None, [], {})}
+    if "votes" in out:
+        out["votes"] = {v["actor_id"]: v["target_id"] for v in out["votes"]}
+    return out
+
+
+def player_history(events):
+    """Phase changes carry no news for players (they repeat the living players), so they are left out."""
+    return [compact(e) for e in events if e["type"] != "phase_changed"]
+
+# Text for the "irrelevant memory" control: real-sounding advice about something other than Mafia.
+# The learner reads as much of it as its own lessons would have filled, so length is matched.
+IRRELEVANT_LESSONS = [
+    "Pack a light rain jacket even when the forecast looks clear.",
+    "Water houseplants less often in winter, when growth slows.",
+    "Let bread dough rise somewhere warm and away from drafts.",
+    "Back up important files to a second drive once a week.",
+    "Stretch before a long run and cool down slowly afterwards.",
+    "Label storage boxes on two sides so they can be read when stacked.",
+    "Check tyre pressure before a long drive, when the tyres are cold.",
+    "Keep a spare charger in the bag you carry most days.",
+]
 
 # Each mode is a separate cohort. An identity stays stable while its role can change.
 COHORTS = {
@@ -41,6 +73,7 @@ class Game:
         self.model = model
         self.strict_training = strict_training
         self.request_timeout = getattr(model, "request_timeout", 30)
+        self.max_days = config.max_days or DEFAULT_MAX_DAYS[config.players]
         self.rng = random.Random(config.seed)
         self.players = list(COHORTS[config.players])
         self.seats = {p: f"seat_{i + 1}" for i, p in enumerate(self.players)}
@@ -74,7 +107,14 @@ class Game:
         self.log = RUNS / "games" / f"{self.id}.jsonl"
         self.memory_root = RUNS / "memory" / config.series / config.provider / config.learning / str(config.players)
         mafia = [p for p in self.players if self.roles[p] == "mafia"]
-        self.learning = (self.players if config.learning == "all" else mafia[:1] if config.learning == "one_mafia" else [])
+        # The learner(s): the players under study. They never get a persona.
+        self.learners = (self.players if config.learning == "all" else mafia[:1] if config.learning == "one_mafia" else [])
+        # Who reads and writes memory between games. Condition c0 keeps the learner's seat but
+        # carries nothing over, so it is the no-learning baseline in the same position.
+        self.condition = config.condition if config.learning == "one_mafia" else None
+        self.learning = [] if self.condition == "c0" else self.learners
+        self.personas = persona_pool.assign(self.players, set(self.learners), config.personas, config.seed,
+                                            naive=config.naive, roles=self.roles)
         for p in self.players:
             path = self.memory_dir(p) / "current.json"
             state = json.loads(path.read_text()) if p in self.learning and path.exists() else {"version": 0, "memory": {}}
@@ -83,8 +123,17 @@ class Game:
             memory.opponent_impressions = [
                 entry for entry in memory.opponent_impressions if entry.agent_id in self.players and entry.agent_id != p
             ]
+            if self.condition == "irrelevant" and memory.generalized_memory:
+                memory = Memory(generalized_memory=self.irrelevant_text(len(memory.generalized_memory)))
             self.memories[p] = memory
         self.notebooks = {p: None for p in self.players}
+
+    def irrelevant_text(self, length):
+        rng = random.Random(f"{self.config.seed}:irrelevant")
+        text = ""
+        while len(text) < length:
+            text += rng.choice(IRRELEVANT_LESSONS) + " "
+        return text[:length].strip()
 
     def memory_dir(self, p):
         """Lessons are kept per seat and per role, so Villager play never reads Mafia lessons."""
@@ -113,8 +162,10 @@ class Game:
 
     def observation(self, p, history=None):
         return {
-            "self": {"agent_id": p, "role": self.roles[p], "alive": p in self.alive},
-            "living_players": sorted(self.alive), "public_history": list(self.history if history is None else history),
+            "self": {"agent_id": p, "role": self.roles[p], "alive": p in self.alive,
+                     "persona": self.personas[p][1] if p in self.personas else None},
+            "living_players": sorted(self.alive),
+            "public_history": player_history(self.history if history is None else history),
             "private_facts": list(self.facts[p]), "memory_version": self.versions[p],
             # The player's own notebook from last night (never another player's).
             "private_notebook": self.notebooks[p],
@@ -123,6 +174,9 @@ class Game:
 
     async def task(self, p, kind, payload, validator=None):
         request = self.envelope(p, kind, payload)
+        calls = []
+        CALLS.set(calls)  # model wrappers append one record per provider call (telemetry.py)
+        started = asyncio.get_running_loop().time()
         timeout = self.request_timeout
         if payload.get("deadline_at"):
             timeout = max(0, (datetime.fromisoformat(payload["deadline_at"]) - now()).total_seconds())
@@ -144,7 +198,8 @@ class Game:
             }, request.message_id)
             if code == "MODEL_TIMEOUT":
                 await self.notify(p, "request_cancelled", {"request_id": request.message_id, "reason": "window_expired"}, request.message_id)
-        self.emit("protocol_exchange", actor_id=p, request=request.model_dump(), response=response.model_dump())
+        self.emit("protocol_exchange", actor_id=p, request=request.model_dump(), response=response.model_dump(),
+                  seconds=round(asyncio.get_running_loop().time() - started, 2), model_calls=calls)
         return response
 
     async def pause_point(self):
@@ -204,12 +259,12 @@ class Game:
             decision.strategy_summary = None
         return decision, problem
 
-    async def action_for(self, p, allowed, targets, history):
+    async def action_for(self, p, allowed, targets, history, extra=None):
         window = f"{self.day}:{self.phase}:{self.round}"
-        request = dict(
+        request = dict(**(extra or {}),
             observation_id=uuid.uuid4().hex, window_id=window, phase=self.phase, day=self.day,
             discussion_round=self.round, allowed_actions=allowed, legal_targets=targets,
-            remaining_speeches_today=4-self.round if self.round else 0,
+            remaining_speeches_today=self.config.discussion_rounds + 1 - self.round if self.round else 0,
             deadline_at=(now()+timedelta(seconds=self.request_timeout)).isoformat(),
             observation=self.observation(p, history), summary_enabled=self.config.showcase,
         )
@@ -253,11 +308,11 @@ class Game:
         self.emit("action_defaulted", actor_id=p, action_type=default, window_id=window)
         return Action(type=default), True
 
-    async def probes(self, event):
+    async def probes(self, event, measurement_point="after_discussion_batch"):
         async def probe(p):
             response = await self.task(p, "belief_probe_requested", dict(
                 probe_id=uuid.uuid4().hex, observation_id=uuid.uuid4().hex,
-                trigger_event_id=event["event_id"], measurement_point="after_discussion_batch",
+                trigger_event_id=event["event_id"], measurement_point=measurement_point,
                 targets=[other for other in sorted(self.alive) if other != p],
                 observation=self.observation(p),
             ))
@@ -265,8 +320,24 @@ class Game:
                 self.emit("belief_probe", actor_id=p, source_event_ids=[event["event_id"]], **response.payload)
         await asyncio.gather(*(probe(p) for p in sorted(self.alive)))
         # Explicit marker: every living player's beliefs for this round have now been measured.
-        self.emit("beliefs_updated", trigger_event_id=event["event_id"],
+        self.emit("beliefs_updated", trigger_event_id=event["event_id"], measurement_point=measurement_point,
                   label=f"D{self.day} R{self.round}", observers=sorted(self.alive))
+
+    def save_moment(self, p, action, candidate, order, position, history):
+        """Everything needed to replay this turn with a different message (E5): the full game state
+        just before a Mafia message is published, plus the message itself. Saved only; replayed later."""
+        moment = dict(
+            game_id=self.id, config=self.config.model_dump(), day=self.day, round=self.round, phase=self.phase,
+            speaker=p, speaking_order=order, speaking_position=position, candidate_message_id=candidate,
+            original_action=action.model_dump(), players=self.players, roles=self.roles, alive=sorted(self.alive),
+            public_history=history, facts=self.facts, notebooks=self.notebooks, personas=self.personas,
+            memories={k: m.model_dump() for k, m in self.memories.items()}, memory_versions=self.versions,
+            actions=self.actions, events_so_far=len(self.events),
+            rng_state=json.loads(json.dumps(self.rng.getstate())),
+        )
+        path = RUNS / "moments" / self.id / f"{candidate}.json"
+        write_json(path, moment)
+        self.emit("moment_saved", actor_id=p, candidate_message_id=candidate, path=str(path))
 
     def check_claim(self, p, claim, message):
         """Compare a structured claim with the authoritative game state (no LLM, no text matching)."""
@@ -281,68 +352,104 @@ class Game:
                   literal_truth=true, speaker_knows_contradiction=not true)
 
     async def discussion(self):
+        """discussion_rounds rounds. Within a round players speak one at a time in a shuffled order,
+        and each speaker sees every message published before their turn."""
         self.round = 1
         await self.set_phase("day_discussion")
-        for self.round in range(1, 4):
+        day_messages = []
+        predictions = []  # Mafia predictions run in the background while the next player speaks
+        for self.round in range(1, self.config.discussion_rounds + 1):
             await self.pause_point()
             order = sorted(self.alive)
             self.rng.shuffle(order)
-            history = list(self.history)
-            decisions = await asyncio.gather(*(self.action_for(p, ["speak", "pass"], [], history) for p in order))
-            pending = []
-            for position, (p, (action, forced)) in enumerate(zip(order, decisions), 1):
-                self.actions[p].append(action.model_dump())
-                candidate = uuid.uuid4().hex if action.type == "speak" else None
-                pending.append((p, action, forced, position, candidate))
-
-            async def predict(p, action, candidate):
-                recipient = next(other for other in order if other != p)
-                response = await self.task(p, "influence_prediction_requested", dict(
-                    prediction_id=uuid.uuid4().hex, observation_id=uuid.uuid4().hex,
-                    candidate_message_id=candidate, candidate_message=action.message,
-                    recipient_id=recipient, targets=[other for other in order if other != recipient],
-                    observation=self.observation(p, history),
-                ))
-                if response.type == "influence_prediction_result":
-                    self.emit("pre_message_prediction", actor_id=p, **response.payload)
-
-            if self.config.showcase:
-                await asyncio.gather(*(predict(p, action, candidate) for p, action, _, _, candidate in pending
-                                       if candidate and self.roles[p] == "mafia"))
-            await self.paused.wait()
             published = []
-            for p, action, forced, position, candidate in pending:
-                if action.type == "speak":
-                    claim = action.claim.model_dump() if action.claim else None
-                    message = self.emit("public_message", True, actor_id=p, message=action.message,
-                                        speaking_position=position, candidate_message_id=candidate, claim=claim)
-                    published.append(message)
-                    if claim:
-                        self.check_claim(p, claim, message)
-                else:
+            for position, p in enumerate(order, 1):
+                await self.paused.wait()
+                history = list(self.history)
+                action, forced = await self.action_for(p, ["speak", "pass"], [], history)
+                self.actions[p].append(action.model_dump())
+                if action.type != "speak":
                     self.emit("pass", actor_id=p, forced=forced, speaking_position=position)
-            await self.public_updates(published)
-            if self.config.showcase and published:
+                    continue
+                candidate = uuid.uuid4().hex
+                mafia = self.roles[p] == "mafia"
+                if mafia and self.config.save_moments:
+                    self.save_moment(p, action, candidate, order, position, history)
+                if mafia and self.config.belief_checks != "off":
+                    # Made from the history before this message, and never shown to anyone, so it
+                    # stays a pre-commitment even though it finishes while the next player speaks.
+                    predictions.append(asyncio.create_task(self.predict(p, action, candidate, order, history)))
+                claim = action.claim.model_dump() if action.claim else None
+                message = self.emit("public_message", True, actor_id=p, message=action.message,
+                                    speaking_position=position, candidate_message_id=candidate, claim=claim)
+                published.append(message)
+                if claim:
+                    self.check_claim(p, claim, message)
+                await self.public_updates([message])
+                if mafia and self.config.belief_checks == "per_mafia_message":
+                    await self.probes(message, measurement_point="after_mafia_message")
+            await asyncio.gather(*predictions)
+            predictions.clear()
+            day_messages += published
+            if self.config.belief_checks == "per_round" and published:
                 await self.probes(published[-1])
             if not published:
                 break
+        if self.config.belief_checks == "per_day" and day_messages:
+            await self.probes(day_messages[-1], measurement_point="end_of_day")
         self.round = None
+
+    async def predict(self, p, action, candidate, order, history):
+        """Before a Mafia message is published, record how its speaker expects it to move a listener."""
+        recipient = next(other for other in order if other != p)
+        response = await self.task(p, "influence_prediction_requested", dict(
+            prediction_id=uuid.uuid4().hex, observation_id=uuid.uuid4().hex,
+            candidate_message_id=candidate, candidate_message=action.message,
+            recipient_id=recipient, targets=[other for other in order if other != recipient],
+            observation=self.observation(p, history),
+        ))
+        if response.type == "influence_prediction_result":
+            self.emit("pre_message_prediction", actor_id=p, **response.payload)
 
     async def vote(self):
         await self.pause_point()
         await self.set_phase("day_vote")
-        order = sorted(self.alive)
+        votes = await self.collect_votes(sorted(self.alive))
+        leaders = self.leaders([v["target_id"] for v in votes])
+        if len(leaders) <= 1:
+            await self.resolve_vote(votes, leaders[0] if leaders else None)
+            return
+        # Tie: a runoff between the tied players only (each candidate votes for the other(s)).
+        # Still tied after that: the game seed picks one of them, so a tie never stalls the game.
+        tie = self.emit("vote_results", True, votes=votes, eliminated_player_id=None,
+                        runoff_candidates=leaders)
+        await self.public_updates([tie])
+        await self.pause_point()
+        await self.set_phase("day_runoff")
+        runoff = await self.collect_votes(sorted(self.alive), candidates=leaders)
+        finalists = self.leaders([v["target_id"] for v in runoff])
+        if len(finalists) == 1:
+            await self.resolve_vote(runoff, finalists[0], runoff=True)
+        else:
+            pool = finalists or leaders
+            await self.resolve_vote(runoff, self.rng.choice(pool), runoff=True, tie_break_pool=pool)
+
+    async def collect_votes(self, order, candidates=None):
         history = list(self.history)
-        decisions = await asyncio.gather(*(self.action_for(p, ["vote"], [o for o in order if o != p], history)
-                                           for p in order))
+        extra = {"runoff_candidates": candidates} if candidates else None
+        decisions = await asyncio.gather(*(
+            self.action_for(p, ["vote"], [o for o in (candidates or order) if o != p], history, extra)
+            for p in order))
         await self.paused.wait()
         votes = []
         for p, (action, forced) in zip(order, decisions):
             self.actions[p].append(action.model_dump())
             votes.append(dict(actor_id=p, target_id=action.target_id, forced=forced))
-        leaders = self.leaders([v["target_id"] for v in votes])
-        target = leaders[0] if len(leaders) == 1 else None
-        events = [self.emit("vote_results", True, votes=votes, eliminated_player_id=target)]
+        return votes
+
+    async def resolve_vote(self, votes, target, runoff=False, tie_break_pool=None):
+        events = [self.emit("vote_results", True, votes=votes, eliminated_player_id=target, runoff=runoff,
+                            tie_break="random" if tie_break_pool else None, tie_break_pool=tie_break_pool)]
         if target:
             self.alive.remove(target)
             events.append(self.emit("player_eliminated", True, player_id=target, cause="day_vote"))
@@ -412,6 +519,15 @@ class Game:
 
         await asyncio.gather(*(write(p) for p in sorted(self.alive)))
 
+    def usage(self):
+        """Totals over every model call in this game, for costing and to spot slow or failing runs."""
+        calls = [c for e in self.events if e["type"] == "protocol_exchange" for c in e.get("model_calls", [])]
+        total = lambda key: sum(c.get(key) or 0 for c in calls)
+        return dict(model_calls=len(calls), failed_calls=sum(1 for c in calls if c.get("error")),
+                    input_tokens=total("input_tokens"), output_tokens=total("output_tokens"),
+                    cost_usd=round(total("cost_usd"), 6), call_seconds=round(total("seconds"), 1),
+                    retries=total("attempts") - sum(1 for c in calls if c.get("attempts")))
+
     def victory(self):
         mafia = sum(self.roles[p] == "mafia" for p in self.alive)
         return "villagers" if mafia == 0 else "mafia" if mafia >= len(self.alive) - mafia else None
@@ -420,9 +536,10 @@ class Game:
         request = dict(source_game_id=self.id, expected_memory_version=self.versions[p],
                        update_window_id=f"{self.id}:memory", deadline_at=(now()+timedelta(seconds=self.request_timeout)).isoformat(),
                        current_memory=self.memories[p].model_dump(),
+                       mode="neutral_summary" if self.condition == "neutral_summary" else "lessons",
                        feedback=dict(own_role=self.roles[p], team_result=self.team_result(p),
-                                     public_events=self.history, own_private_results=self.facts[p],
-                                     own_actions=self.actions[p], role_disclosures=[]),
+                                     public_events=player_history(self.history), own_private_results=self.facts[p],
+                                     own_actions=self.actions[p], role_disclosures=self.disclosures()),
                        requirements=dict(max_rendered_utf8_bytes=16384,
                                          opponent_ids=[other for other in self.players if other != p]))
         response = await self.task(p, "reflection_requested", request)
@@ -458,6 +575,10 @@ class Game:
                            error={"code": str(error) if str(error).isupper() else "INVALID_MEMORY_SCHEMA", "retryable": False})
         await self.notify(p, "memory_update_receipt", receipt, response.message_id)
 
+    def disclosures(self):
+        """After a game, every player learns everyone's role, so a reflection can tell skill from luck."""
+        return [dict(agent_id=q, role=self.roles[q]) for q in self.players]
+
     def team_result(self, p):
         team = "mafia" if self.roles[p] == "mafia" else "villagers"
         return "draw" if self.winner is None else "win" if team == self.winner else "loss"
@@ -465,31 +586,40 @@ class Game:
     async def run(self):
         try:
             self.emit("game_started", True, players=self.players, seats=self.seats, seed=self.config.seed,
+                      discussion_rounds=self.config.discussion_rounds,
                       provider=self.config.provider, learning=self.config.learning, showcase=self.config.showcase)
             self.emit("roles_assigned", roles=self.roles)
+            self.emit("setup_details", learners=self.learners, condition=self.condition,
+                      personas={p: name for p, (name, _) in self.personas.items()},
+                      persona_pool=self.config.personas, belief_checks=self.config.belief_checks,
+                      max_days=self.max_days)
             for p in self.players:
                 await self.notify(p, "game_started", {
                     "self": self.observation(p)["self"], "players": self.players, "private_facts": self.facts[p],
-                    "rules": {"max_discussion_rounds": 3, "max_days": self.config.max_days},
+                    "rules": {"max_discussion_rounds": self.config.discussion_rounds, "max_days": self.max_days,
+                              "night_first": True,
+                              "speaking": "one at a time", "vote_ties": "runoff, then random"},
                     "memory": {"version": self.versions[p], "updates_enabled": p in self.learning, **self.memories[p].model_dump()},
                     "summary_enabled": self.config.showcase,
                 })
-            for day in range(1, self.config.max_days + 1):
+            # Each day starts with a night, so day 1 opens with a death and an investigation to discuss.
+            for day in range(1, self.max_days + 1):
                 self.day = day
+                await self.night()
+                self.winner = self.victory()
+                if self.winner:
+                    break
+                if self.config.notebook and day > 1:
+                    await self.write_notebooks()
                 await self.discussion()
                 await self.vote()
                 self.winner = self.victory()
                 if self.winner:
                     break
-                await self.night()
-                self.winner = self.victory()
-                if self.winner:
-                    break
-                if self.config.notebook:
-                    await self.write_notebooks()
             if self.strict_training and getattr(self.model, "quota_exhausted", False):
                 raise CodexProviderError("USAGE_LIMIT_REACHED")
             self.phase = "game_over"
+            self.emit("usage_summary", **self.usage())
             reason = ("all_mafia_eliminated" if self.winner == "villagers"
                       else "mafia_parity" if self.winner == "mafia" else "day_limit")
             final = self.emit("game_ended", True, winner=self.winner, reason=reason,
@@ -497,7 +627,8 @@ class Game:
             for p in self.players:
                 await self.notify(p, "game_ended", {
                     "winner": self.winner, "reason": reason, "final_day": self.day,
-                    "team_result": self.team_result(p), "final_public_event_id": final["event_id"], "role_disclosures": [],
+                    "team_result": self.team_result(p), "final_public_event_id": final["event_id"],
+                    "role_disclosures": self.disclosures(),
                 })
             self.phase = "memory_update"
             if self.strict_training and any(event["type"] == "action_defaulted" for event in self.events):

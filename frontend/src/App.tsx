@@ -87,6 +87,7 @@ export function App() {
         round={state.round}
         provider={state.provider}
         showcase={state.showcase}
+        rounds={state.rounds}
         winner={state.winner}
         defaulted={state.defaultedCount}
         claimsDropped={state.claimsDropped}

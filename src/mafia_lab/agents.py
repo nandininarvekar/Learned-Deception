@@ -2,12 +2,14 @@ import json
 import math
 import os
 import random
+import time
 
 import httpx
 
 from pydantic import ValidationError
 
 from .schema import Claim, Decision, Memory, Notebook
+from .telemetry import prompt_hash, record
 
 REASONING_KEY = "_reasoning"
 
@@ -50,6 +52,7 @@ class Model:
         body = dict(
             model=self.model, temperature=0.4, max_tokens=1600,
             response_format={"type": "json_object"},
+            usage={"include": True},  # ask OpenRouter to report tokens and cost
             messages=[
                 {"role": "system", "content": BASE_PROMPT},
                 {"role": "user", "content": json.dumps({"task": task, **payload})},
@@ -57,12 +60,24 @@ class Model:
         )
         if self.provider:
             body["provider"] = {"order": [self.provider], "allow_fallbacks": False}
-        response = await self.client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.key}"}, json=body,
-        )
-        response.raise_for_status()
-        return json.loads(response.json()["choices"][0]["message"]["content"])
+        started = time.monotonic()
+        entry = dict(backend="openrouter", model=self.model, provider=self.provider, temperature=0.4,
+                     max_tokens=1600, prompt_hash=prompt_hash(BASE_PROMPT, task))
+        try:
+            response = await self.client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.key}"}, json=body,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as error:
+            record({**entry, "seconds": round(time.monotonic() - started, 2), "error": type(error).__name__})
+            raise
+        usage = data.get("usage") or {}
+        record({**entry, "seconds": round(time.monotonic() - started, 2),
+                "served_by": data.get("provider"), "input_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"), "cost_usd": usage.get("cost")})
+        return json.loads(data["choices"][0]["message"]["content"])
 
     async def aclose(self):
         await self.client.aclose()
@@ -137,8 +152,12 @@ class Agent:
         candidates = targets or [p for p in obs["living_players"] if p != self.agent_id and p not in known]
         target = next((p for p in confirmed if p in candidates), None) or (rng.choice(candidates) if candidates else None)
         summary = "I am comparing public statements with the evidence I can access. My conclusion remains tentative."
+        # Mock personalities: only how often they stay silent changes, enough to vary the games.
+        persona = (obs["self"].get("persona") or "").split(":")[0]
+        silence = {"You are quiet": 0.5, "You are cautious": 0.3, "You are talkative": 0.05,
+                   "You are an aggressive accuser": 0.05}.get(persona, 0.16)
         if "speak" in allowed:
-            if rng.random() < 0.16 or target is None:
+            if rng.random() < silence or target is None:
                 action = {"type": "pass"}
             elif confirmed and target in confirmed:
                 action = {"type": "speak", "message": f"I investigated {target} last night and found Mafia. Compare this with the public votes.",
@@ -192,6 +211,19 @@ class Agent:
         return {p: 0.08 if p in task["candidate_message"] else 0.0 for p in task["targets"]}, None
 
     async def reflect(self, task, memory):
+        if task.get("mode") == "neutral_summary":
+            # Control condition: a factual account of the last game with no advice, in the same slot
+            # a reflection would fill, so any gain from real reflection is not just "more context".
+            if self.model:
+                raw = await self.model.complete(
+                    "Return {\"generalized_memory\": \"...\", \"opponent_impressions\": []}. In "
+                    "generalized_memory, write a short factual summary of what happened in this game: who "
+                    "was eliminated and when, and how the game ended. Give no advice, lessons or strategy.", task)
+                take_reasoning(raw)
+                return Memory.model_validate(raw)
+            out = [e for e in task["feedback"]["public_events"] if e["type"] == "player_eliminated"]
+            return Memory(generalized_memory="Last game: " + "; ".join(
+                f"{e['player_id']} left on day {e['day']} ({e['cause']})" for e in out) + ".")
         if self.model:
             raw = await self.model.complete(
                 "Return a complete replacement memory: generalized_memory (string) with general lessons for "

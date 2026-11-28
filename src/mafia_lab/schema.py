@@ -65,6 +65,9 @@ class Notebook(StrictModel):
     plan: ShortText
 
 
+DEFAULT_MAX_DAYS = {4: 3, 8: 6, 12: 8}
+
+
 class Start(StrictModel):
     seed: int = 7
     players: Literal[4, 8, 12] = 8
@@ -72,11 +75,28 @@ class Start(StrictModel):
     provider: Literal["mock", "openrouter", "codex"] = "mock"
     showcase: bool = True
     delay: float = Field(default=0.3, ge=0, le=5)
-    max_days: int = Field(default=5, ge=1, le=10)
+    # None = the default for the game size (DEFAULT_MAX_DAYS): enough days that games end in a
+    # result, not a day-limit draw.
+    max_days: int | None = Field(default=None, ge=1, le=12)
     series: str = Field(default="demo", pattern=r"^[a-zA-Z0-9_-]{1,48}$")
     # Nightly notebook: each living player reflects after every night. Keep the same setting
     # across all conditions of an experiment.
     notebook: bool = True
+    # Opponent personalities, assigned per game from the seed (never per name). The learning agent
+    # always plays without one. "training" and "heldout" are two separate pools (for H3).
+    personas: Literal["off", "training", "heldout"] = "training"
+    # Naive-persona study: one non-learning Villager is told they tend to believe others.
+    naive: bool = False
+    # How often every living player is asked how likely each other player is to be Mafia.
+    belief_checks: Literal["off", "per_day", "per_round", "per_mafia_message"] = "per_round"
+    # Discussion rounds per day. Two keeps games shorter; every speaker still sees the talk so far.
+    discussion_rounds: int = Field(default=2, ge=1, le=3)
+    # What the learning Mafia agent (learning="one_mafia") carries between games:
+    # c0 = nothing; c2 = its own reflection; irrelevant = it still reflects, but reads unrelated
+    # text of the same length; neutral_summary = a factual summary of the last game, no advice.
+    condition: Literal["c0", "c2", "irrelevant", "neutral_summary"] = "c2"
+    # Save the full game state before every Mafia message, so the moment can be replayed (E5).
+    save_moments: bool = True
 
 
 class Envelope(StrictModel):
