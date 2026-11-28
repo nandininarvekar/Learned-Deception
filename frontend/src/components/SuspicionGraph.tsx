@@ -3,9 +3,14 @@ import type { Beliefs, GameState } from "../data/reducer";
 import { displayName, meanSuspicion } from "../data/reducer";
 import { ROLE_COLOR, ROLE_LABEL, suspicionColor } from "../data/colors";
 
-const SIZE = 520;
-const CENTER = SIZE / 2;
-const RING = 185;
+// Seats sit evenly around a wide rectangle (like a long table), so the wide panel is used
+// and 12 players still get room for readable name labels.
+const W = 900;
+const H = 610;
+const CX = W / 2;
+const CY = 300;
+const RX = 370;
+const RY = 215;
 const NODE_R = 40; // half the seat frame plus a little room, so arrows start and end outside the portrait
 const FACE = 64; // portrait frame size
 const BOW = 34; // curve offset so A→B and B→A don't overlap
@@ -17,12 +22,21 @@ const len = (a: Point) => Math.hypot(a.x, a.y) || 1;
 const unit = (a: Point) => ({ x: a.x / len(a), y: a.y / len(a) });
 
 function seatPositions(players: string[]): Record<string, Point> {
-  return Object.fromEntries(
-    players.map((id, i) => {
-      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / players.length;
-      return [id, { x: CENTER + RING * Math.cos(angle), y: CENTER + RING * Math.sin(angle) }];
-    }),
-  );
+  // Walk clockwise around the rectangle's edge from top-centre, one equal step per seat.
+  const perimeter = 4 * RX + 4 * RY;
+  const at = (d: number): Point => {
+    d = ((d % perimeter) + perimeter) % perimeter;
+    if (d < RX) return { x: CX + d, y: CY - RY }; // top edge, right half
+    d -= RX;
+    if (d < 2 * RY) return { x: CX + RX, y: CY - RY + d }; // right edge
+    d -= 2 * RY;
+    if (d < 2 * RX) return { x: CX + RX - d, y: CY + RY }; // bottom edge
+    d -= 2 * RX;
+    if (d < 2 * RY) return { x: CX - RX, y: CY + RY - d }; // left edge
+    d -= 2 * RY;
+    return { x: CX - RX + d, y: CY - RY }; // top edge, left half
+  };
+  return Object.fromEntries(players.map((id, i) => [id, at((i * perimeter) / players.length)]));
 }
 
 function edgeGeometry(a: Point, b: Point, width: number) {
@@ -190,21 +204,21 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
           </button>
         )}
       </div>
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="graph-svg" role="img" aria-label="Suspicion graph" onClick={() => onFocus(null)}>
-        <rect x={CENTER - 120} y={CENTER - 78} width={240} height={156} className="table-top" />
-        <rect x={CENTER - 112} y={CENTER - 70} width={224} height={140} className="table-edge" />
+      <svg viewBox={`0 0 ${W} ${H}`} className="graph-svg" role="img" aria-label="Suspicion graph" onClick={() => onFocus(null)}>
+        <rect x={CX - 170} y={CY - 85} width={340} height={170} className="table-top" />
+        <rect x={CX - 162} y={CY - 77} width={324} height={154} className="table-edge" />
         {fresh && lastStep && (
           <g className="banner">
-            <rect x={CENTER - 130} y={10} width={260} height={28} />
-            <text x={CENTER} y={29}>Beliefs updated · {lastStep.label.replace("D", "Day ").replace(" R", " · round ")}</text>
+            <rect x={CX - 165} y={CY - 72} width={330} height={30} />
+            <text x={CX} y={CY - 51}>Beliefs updated · {lastStep.label.replace("D", "Day ").replace(" R", " · round ")}</text>
           </g>
         )}
         {!(presentation && latest) && (
-          <text x={CENTER} y={CENTER - 4} className="center-label">
+          <text x={CX} y={CY + 6} className="center-label">
             {state.phaseLabel}
           </text>
         )}
-        <text x={CENTER} y={CENTER + 20} className="center-sub" style={{ display: presentation && latest ? "none" : undefined }}>
+        <text x={CX} y={CY + 34} className="center-sub" style={{ display: presentation && latest ? "none" : undefined }}>
           {beliefsMode
             ? `${shownCount} arrow${shownCount === 1 ? "" : "s"}${focus ? "" : " · click a player to focus"}`
             : state.lastVotes.length
@@ -256,7 +270,7 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
           );
         })}
         {presentation && latest && (
-          <foreignObject x={CENTER - 135} y={CENTER - 78} width={270} height={156}>
+          <foreignObject x={CX - 170} y={CY - 90} width={340} height={180}>
             <div className={`speech speech-${latest.kind}`}>
               <div className="speech-phase">{state.phaseLabel}</div>
               <div className="speech-title">{latest.kind === "message" ? `${latest.title} says` : latest.title}</div>
@@ -269,7 +283,8 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
           const alive = state.alive.has(id);
           const role = spectator ? state.roles[id] : undefined;
           const name = displayName(id);
-          const nameWidth = Math.max(48, name.length * 9 + (alive ? 12 : 48));
+          const label = name + (alive ? "" : " · out");
+          const nameWidth = Math.max(56, label.length * 13 + 18);
           return (
             <g
               key={id}
@@ -289,18 +304,23 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
                 <path d={`M${p.x - 22},${p.y - 22} L${p.x + 22},${p.y + 22} M${p.x + 22},${p.y - 22} L${p.x - 22},${p.y + 22}`} className="dead-cross" />
               )}
               {role && (
-                <g className="role-stamp" transform={`translate(${p.x + 26} ${p.y - 34}) rotate(8)`}>
-                  <rect x={-30} y={-9} width={60} height={16} style={{ fill: ROLE_COLOR[role] ?? "var(--seat)" }} />
-                  <text x={0} y={3}>{ROLE_LABEL[role] ?? role}</text>
+                <g className="role-stamp" transform={`translate(${p.x + 26} ${p.y - 36}) rotate(8)`}>
+                  <rect
+                    x={-((ROLE_LABEL[role] ?? role).length * 5.5 + 8)}
+                    y={-11}
+                    width={(ROLE_LABEL[role] ?? role).length * 11 + 16}
+                    height={20}
+                    style={{ fill: ROLE_COLOR[role] ?? "var(--seat)" }}
+                  />
+                  <text x={0} y={4}>{ROLE_LABEL[role] ?? role}</text>
                 </g>
               )}
-              <rect x={p.x - nameWidth / 2} y={p.y + FACE / 2 + 6} width={nameWidth} height={18} className="seat-name-bg" />
-              <text x={p.x} y={p.y + FACE / 2 + 19} className="seat-name">
-                {name}
-                {alive ? "" : " · out"}
+              <rect x={p.x - nameWidth / 2} y={p.y + FACE / 2 + 6} width={nameWidth} height={28} className="seat-name-bg" />
+              <text x={p.x} y={p.y + FACE / 2 + 27} className="seat-name">
+                {label}
               </text>
               {mostSuspected === id && (
-                <text x={p.x} y={p.y + FACE / 2 + 36} className="most-suspected">
+                <text x={p.x} y={p.y + FACE / 2 + 52} className="most-suspected">
                   Most suspected
                 </text>
               )}

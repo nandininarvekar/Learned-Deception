@@ -10,15 +10,17 @@ const PROVIDERS: { value: StartOptions["provider"]; title: string; text: string 
   { value: "codex", title: "Codex CLI", text: "A real model through the server's signed-in Codex account." },
 ];
 
-const SIZES: { value: 4 | 6; title: string; text: string }[] = [
-  { value: 6, title: "6 players", text: "2 Mafia, 1 Detective, 3 Villagers" },
+// Same cohorts as the backend (game.py COHORTS / MAFIA_COUNTS).
+const SIZES: { value: StartOptions["players"]; title: string; text: string }[] = [
   { value: 4, title: "4 players", text: "1 Mafia, 1 Detective, 2 Villagers" },
+  { value: 8, title: "8 players", text: "2 Mafia, 1 Detective, 5 Villagers" },
+  { value: 12, title: "12 players", text: "3 Mafia, 1 Detective, 8 Villagers" },
 ];
 
 const PROVIDER_NAME: Record<StartOptions["provider"], string> = { mock: "Mock agents", openrouter: "OpenRouter", codex: "Codex CLI" };
 
 export function NewCase({ onStart }: { onStart: (options: StartOptions) => void }) {
-  const [options, setOptions] = useState<StartOptions>({ provider: "mock", players: 6, showcase: true, delay: 0.3 });
+  const [options, setOptions] = useState<StartOptions>({ provider: "mock", players: 8, showcase: true, delay: 0.3 });
   return (
     <div className="new-case">
       <div>
