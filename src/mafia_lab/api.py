@@ -85,11 +85,15 @@ async def start(config: Start):
 
 @app.get("/api/games")
 def list_games():
-    ids = list(games)
-    ids.extend(p.stem for p in sorted((RUNS / "games").glob("*.jsonl"),
-                                     key=lambda p: p.stat().st_mtime)
-               if p.stem not in games)
-    return {"games": [{"game_id": game_id, "done": read_game(game_id)[1]} for game_id in reversed(ids)]}
+    # Newest first, ordered by when each game started, so games from this server run and
+    # earlier runs sort together and the UI can number them (#1 = oldest).
+    ids = set(games) | {p.stem for p in (RUNS / "games").glob("*.jsonl")}
+    rows = []
+    for game_id in ids:
+        items, done = read_game(game_id)
+        rows.append((items[0]["timestamp_utc"] if items else "", game_id, done))
+    rows.sort(reverse=True)
+    return {"games": [{"game_id": game_id, "done": done} for _, game_id, done in rows]}
 
 
 @app.get("/api/games/{game_id}/events")

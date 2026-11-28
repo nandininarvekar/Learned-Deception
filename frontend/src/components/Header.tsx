@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { GameSummary, StartOptions, StreamStatus } from "../data/api";
-import { NewCase } from "./NewCase";
+import { CaseFiles, NewCase } from "./NewCase";
 import { PhaseSteps } from "./PhaseSteps";
 
 interface Props {
@@ -89,9 +89,9 @@ export function Header(props: Props) {
               aria-label="Choose a game"
             >
               <option value="">Choose a game…</option>
-              {props.games.map((g) => (
+              {props.games.map((g, i) => (
                 <option key={g.game_id} value={g.game_id}>
-                  {g.game_id.slice(0, 8)} · {g.done ? "finished" : "running"}
+                  #{props.games.length - i} · {g.game_id.slice(0, 8)} · {g.done ? "finished" : "running"}
                 </option>
               ))}
             </select>
@@ -142,6 +142,14 @@ export function Header(props: Props) {
               props.onStart(options);
               setShowNew(false);
             }}
+          />
+          <CaseFiles
+            games={props.games}
+            onSelect={(id) => {
+              props.onSelect(id);
+              setShowNew(false);
+            }}
+            onRefresh={props.onRefresh}
           />
         </section>
       )}

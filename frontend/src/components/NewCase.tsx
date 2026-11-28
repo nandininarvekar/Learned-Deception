@@ -81,14 +81,21 @@ export function CaseFiles({ games, onSelect, onRefresh }: { games: GameSummary[]
         <h2>Case files</h2>
         <button onClick={onRefresh} title="Refresh game list">↻ Refresh</button>
       </div>
-      <p style={{ margin: 0, fontSize: 13 }}>Open any game to watch it live or replay it.</p>
-      {games.length === 0 && <p className="muted" style={{ margin: 0, color: "#4a4636" }}>No games yet.</p>}
-      {games.map((g) => (
-        <button key={g.game_id} className="case-file" onClick={() => onSelect(g.game_id, g.done)}>
-          <span>Case {g.game_id.slice(0, 8)}</span>
-          <span className={"case-stamp " + (g.done ? "finished" : "running")}>{g.done ? "Finished" : "Running"}</span>
-        </button>
-      ))}
+      <p style={{ margin: 0, fontSize: 14 }}>
+        {games.length} game{games.length === 1 ? "" : "s"} recorded. Open one to watch it live or replay it.
+      </p>
+      <div className="case-list">
+        {games.length === 0 && <p style={{ margin: 0, color: "#4a4636" }}>No games yet.</p>}
+        {games.map((g, i) => (
+          <button key={g.game_id} className="case-file" onClick={() => onSelect(g.game_id, g.done)}>
+            <span>
+              <span className="case-num">#{games.length - i}</span>
+              <span className="case-id">{g.game_id.slice(0, 8)}</span>
+            </span>
+            <span className={"case-stamp " + (g.done ? "finished" : "running")}>{g.done ? "Finished" : "Running"}</span>
+          </button>
+        ))}
+      </div>
     </aside>
   );
 }

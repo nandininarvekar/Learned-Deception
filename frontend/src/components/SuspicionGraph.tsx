@@ -6,13 +6,13 @@ import { ROLE_COLOR, ROLE_LABEL, suspicionColor } from "../data/colors";
 // Seats sit evenly around a wide rectangle (like a long table), so the wide panel is used
 // and 12 players still get room for readable name labels.
 const W = 900;
-const H = 610;
+const H = 640;
 const CX = W / 2;
-const CY = 300;
+const CY = 310;
 const RX = 370;
 const RY = 215;
-const NODE_R = 40; // half the seat frame plus a little room, so arrows start and end outside the portrait
-const FACE = 64; // portrait frame size
+const FACE = 84; // portrait frame size
+const NODE_R = FACE / 2 + 8; // arrows start and end just outside the portrait
 const BOW = 34; // curve offset so A→B and B→A don't overlap
 const MIN_DELTA = 0.05; // smaller belief changes are not labelled
 
@@ -46,8 +46,8 @@ function edgeGeometry(a: Point, b: Point, width: number) {
   const s = unit(sub(control, a));
   const e = unit(sub(control, b));
   const start = { x: a.x + s.x * NODE_R, y: a.y + s.y * NODE_R };
-  const tip = { x: b.x + e.x * (NODE_R + 3), y: b.y + e.y * (NODE_R + 3) };
-  const head = 8 + width * 0.8;
+  const tip = { x: b.x + e.x * (NODE_R + 4), y: b.y + e.y * (NODE_R + 4) };
+  const head = 14 + width * 1.2;
   const back = unit(sub(control, tip));
   const side = { x: -back.y, y: back.x };
   const base = { x: tip.x + back.x * head, y: tip.y + back.y * head };
@@ -90,7 +90,7 @@ function PixelFace({ id, x, y }: { id: string; x: number; y: number }) {
   const shirt = SHIRT[(h >>> 6) % SHIRT.length];
   const long = (h >>> 9) % 2 === 0;
   return (
-    <g className="face" transform={`translate(${x - 28} ${y - 28}) scale(3.5)`} shapeRendering="crispEdges" aria-hidden="true">
+    <g className="face" transform={`translate(${x - 38} ${y - 38}) scale(4.75)`} shapeRendering="crispEdges" aria-hidden="true">
       <rect x="4" y="2" width="8" height="2" fill={hair} />
       {long && <rect x="3" y="3" width="1" height="6" fill={hair} />}
       {long && <rect x="12" y="3" width="1" height="6" fill={hair} />}
@@ -246,15 +246,17 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
             );
           })}
         {edges.map((edge) => {
-          const width = beliefsMode ? 1.5 + 6.5 * edge.p : 3;
+          const width = beliefsMode ? 3 + 7 * edge.p : 5;
           const g = edgeGeometry(pos[edge.from], pos[edge.to], width);
           const color = beliefsMode ? suspicionColor(edge.p) : "var(--vote)";
           const showDelta = beliefsMode && edge.shown && fresh && edge.delta !== null && Math.abs(edge.delta) >= MIN_DELTA;
           const showPct = beliefsMode && edge.shown && !showDelta && !!selected;
           return (
             <g key={`${edge.from}-${edge.to}`} className="edge" style={{ opacity: edge.shown ? 0.4 + 0.6 * edge.p : 0 }}>
+              {/* dark outline first, so every arrow stands out from the floor and the table */}
+              <path d={g.d} fill="none" strokeLinecap="square" className="edge-outline" style={{ strokeWidth: width + 5 }} />
               <path d={g.d} fill="none" strokeLinecap="square" style={{ stroke: color, strokeWidth: width }} />
-              <polygon points={g.arrow} style={{ fill: color }} />
+              <polygon points={g.arrow} className="edge-head" style={{ fill: color }} />
               {showDelta && (
                 <text x={g.label.x} y={g.label.y} className={"edge-label " + (edge.delta! > 0 ? "up" : "down")}>
                   {edge.delta! > 0 ? "+" : "−"}
@@ -284,7 +286,7 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
           const role = spectator ? state.roles[id] : undefined;
           const name = displayName(id);
           const label = name + (alive ? "" : " · out");
-          const nameWidth = Math.max(56, label.length * 13 + 18);
+          const nameWidth = Math.max(64, label.length * 14.5 + 20);
           return (
             <g
               key={id}
@@ -301,26 +303,26 @@ export function SuspicionGraph({ state, spectator, fresh, focus, onFocus, presen
               <rect x={p.x - FACE / 2} y={p.y - FACE / 2} width={FACE} height={FACE} className="seat-frame" />
               <PixelFace id={id} x={p.x} y={p.y} />
               {!alive && (
-                <path d={`M${p.x - 22},${p.y - 22} L${p.x + 22},${p.y + 22} M${p.x + 22},${p.y - 22} L${p.x - 22},${p.y + 22}`} className="dead-cross" />
+                <path d={`M${p.x - 30},${p.y - 30} L${p.x + 30},${p.y + 30} M${p.x + 30},${p.y - 30} L${p.x - 30},${p.y + 30}`} className="dead-cross" />
               )}
               {role && (
-                <g className="role-stamp" transform={`translate(${p.x + 26} ${p.y - 36}) rotate(8)`}>
+                <g className="role-stamp" transform={`translate(${p.x + 30} ${p.y - FACE / 2 - 8}) rotate(6)`}>
                   <rect
-                    x={-((ROLE_LABEL[role] ?? role).length * 5.5 + 8)}
-                    y={-11}
-                    width={(ROLE_LABEL[role] ?? role).length * 11 + 16}
-                    height={20}
+                    x={-((ROLE_LABEL[role] ?? role).length * 6.5 + 8)}
+                    y={-13}
+                    width={(ROLE_LABEL[role] ?? role).length * 13 + 16}
+                    height={24}
                     style={{ fill: ROLE_COLOR[role] ?? "var(--seat)" }}
                   />
-                  <text x={0} y={4}>{ROLE_LABEL[role] ?? role}</text>
+                  <text x={0} y={5}>{ROLE_LABEL[role] ?? role}</text>
                 </g>
               )}
-              <rect x={p.x - nameWidth / 2} y={p.y + FACE / 2 + 6} width={nameWidth} height={28} className="seat-name-bg" />
-              <text x={p.x} y={p.y + FACE / 2 + 27} className="seat-name">
+              <rect x={p.x - nameWidth / 2} y={p.y + FACE / 2 + 6} width={nameWidth} height={34} className="seat-name-bg" />
+              <text x={p.x} y={p.y + FACE / 2 + 31} className="seat-name">
                 {label}
               </text>
               {mostSuspected === id && (
-                <text x={p.x} y={p.y + FACE / 2 + 52} className="most-suspected">
+                <text x={p.x} y={p.y + FACE / 2 + 60} className="most-suspected">
                   Most suspected
                 </text>
               )}
