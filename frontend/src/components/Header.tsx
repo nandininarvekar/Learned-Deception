@@ -29,7 +29,7 @@ const STATUS_LABEL: Record<StreamStatus, string> = {
 };
 
 export function Header(props: Props) {
-  const [options, setOptions] = useState<StartOptions>({ provider: "mock", players: 6, showcase: true, delay: 0.3 });
+  const [options, setOptions] = useState<StartOptions>({ provider: "mock", players: 8, showcase: true, delay: 0.3 });
   const running = props.status === "live" || props.status === "connecting";
   const result =
     props.winner === undefined ? null : props.winner === "mafia" ? "Mafia wins" : props.winner === "villagers" ? "Villagers win" : "Ended";
@@ -71,11 +71,12 @@ export function Header(props: Props) {
         </select>
         <select
           value={options.players}
-          onChange={(e) => setOptions({ ...options, players: Number(e.target.value) as 4 | 6 })}
+          onChange={(e) => setOptions({ ...options, players: Number(e.target.value) as StartOptions["players"] })}
           aria-label="Number of players"
         >
-          <option value={6}>6 players</option>
           <option value={4}>4 players</option>
+          <option value={8}>8 players</option>
+          <option value={12}>12 players</option>
         </select>
         <label className="inline" title="Showcase games probe beliefs and record predictions (more model calls)">
           <input

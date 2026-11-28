@@ -67,7 +67,7 @@ class Notebook(StrictModel):
 
 class Start(StrictModel):
     seed: int = 7
-    players: Literal[4, 6] = 6
+    players: Literal[4, 8, 12] = 8
     learning: Literal["off", "one_mafia", "all"] = "all"
     provider: Literal["mock", "openrouter", "codex"] = "mock"
     showcase: bool = True

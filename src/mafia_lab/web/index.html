@@ -8,8 +8,8 @@
 <body>
 <header><a href="/" class="brand"><span class="mark">◆</span> Mafia Lab</a><span id="status" role="status">Ready</span></header>
 <main>
-<section class="intro"><div><p class="eyebrow">LEARNED DECEPTION</p><h1>The Mafia Table</h1><p>Watch six agents discuss, vote, and adapt across games.</p></div>
-<form id="start"><label>Seed <input id="seed" type="number" value="7" required></label><label>Learning <select id="learning"><option value="all">All agents</option><option value="one_mafia">One Mafia</option><option value="off">Off</option></select></label><button type="submit">Start simulation</button></form></section>
+<section class="intro"><div><p class="eyebrow">LEARNED DECEPTION</p><h1>The Mafia Table</h1><p>Watch agents discuss, vote, and adapt across games.</p></div>
+<form id="start"><label>Seed <input id="seed" type="number" value="7" required></label><label>Players <select id="playerCount"><option value="4">4</option><option value="8" selected>8</option><option value="12">12</option></select></label><label>Learning <select id="learning"><option value="all">All agents</option><option value="one_mafia">One Mafia</option><option value="off">Off</option></select></label><button type="submit">Start simulation</button></form></section>
 <div class="toolbar"><label>Replay <select id="replay"><option value="">Select a game</option></select></label><label class="toggle"><input type="checkbox" id="spectator" checked> Spectator view</label><button type="button" class="secondary" id="pause" disabled>Pause</button></div>
 <div id="error" role="alert" hidden></div>
 <div class="layout">

@@ -9,7 +9,7 @@ python -m pip install -e .
 python -m uvicorn mafia_lab.api:app --host 127.0.0.1 --port 8765
 ```
 
-Open [Mafia Lab](http://127.0.0.1:8765) and select **Start simulation**. The default is a six-player seeded mock game. Use **Spectator view** for private strategy reports, roles, belief probes, and postgame memories. **Replay** opens an existing game's event stream. The API also accepts four-player games.
+Open [Mafia Lab](http://127.0.0.1:8765) and select **Start simulation**. The default is an eight-player seeded mock game. Use **Spectator view** for private strategy reports, roles, belief probes, and postgame memories. **Replay** opens an existing game's event stream. Select 4, 8, or 12 players.
 
 The app is a loopback-only demo. Spectator view exposes private research data to the local operator. Run it with one Uvicorn worker. Completed game logs are under `runs/games/`. Memory versions and each agent's rendered `skill.md` are under `runs/memory/`. The series, model provider mode, and learning mode partition memory. For independent experimental runs, use distinct series IDs. The mock simulation illustrates the UI and protocol.
 

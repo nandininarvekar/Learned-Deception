@@ -13,12 +13,14 @@ from .schema import Action, Decision, Envelope, Memory, Notebook
 
 RUNS = Path("runs")
 
-# Neutral, short display names. Each game draws a fresh random set (from the game seed), so a
-# name never sticks to a seat or role across games: names can bias play (Mini-Mafia), and fresh
-# names stop a learning agent from memorising specific opponents between games.
-NAMES = ["Alex", "Bruno", "Chen", "Dara", "Emeka", "Farah", "Gita", "Hugo", "Ines", "Jonas",
-         "Kai", "Lena", "Mira", "Nico", "Omar", "Priya", "Rosa", "Sami", "Tomas", "Uma",
-         "Vera", "Wen", "Yara", "Zane"]
+# Each mode is a separate cohort. An identity stays stable while its role can change.
+COHORTS = {
+    4: ("Alex", "Bruno", "Chen", "Dara"),
+    8: ("Emeka", "Farah", "Gita", "Hugo", "Ines", "Jonas", "Kai", "Lena"),
+    12: ("Mira", "Nico", "Omar", "Priya", "Rosa", "Sami", "Tomas", "Uma",
+         "Vera", "Wen", "Yara", "Zane"),
+}
+MAFIA_COUNTS = {4: 1, 8: 2, 12: 3}
 
 
 def now():
@@ -33,16 +35,17 @@ def write_json(path, value):
 
 
 class Game:
-    def __init__(self, config, model=None):
+    def __init__(self, config, model=None, *, strict_training=False):
         self.id = uuid.uuid4().hex
         self.config = config
         self.model = model
+        self.strict_training = strict_training
+        self.request_timeout = getattr(model, "request_timeout", 30)
         self.rng = random.Random(config.seed)
-        self.players = self.rng.sample(NAMES, config.players)
-        # Memory is stored per seat, because names change every game.
+        self.players = list(COHORTS[config.players])
         self.seats = {p: f"seat_{i + 1}" for i, p in enumerate(self.players)}
-        roles = (["mafia", "detective", "villager", "villager"] if config.players == 4
-                 else ["mafia", "mafia", "detective", "villager", "villager", "villager"])
+        mafia_count = MAFIA_COUNTS[config.players]
+        roles = ["mafia"] * mafia_count + ["detective"] + ["villager"] * (config.players - mafia_count - 1)
         if config.learning == "one_mafia":
             roles.remove("mafia")
             self.rng.shuffle(roles)
@@ -76,14 +79,16 @@ class Game:
             path = self.memory_dir(p) / "current.json"
             state = json.loads(path.read_text()) if p in self.learning and path.exists() else {"version": 0, "memory": {}}
             self.versions[p] = state["version"]
-            # Only general lessons carry over: names change every game, so opinions about
-            # specific opponents would refer to players who are not in this game.
-            self.memories[p] = Memory(generalized_memory=Memory.model_validate(state["memory"]).generalized_memory)
+            memory = Memory.model_validate(state["memory"])
+            memory.opponent_impressions = [
+                entry for entry in memory.opponent_impressions if entry.agent_id in self.players and entry.agent_id != p
+            ]
+            self.memories[p] = memory
         self.notebooks = {p: None for p in self.players}
 
     def memory_dir(self, p):
         """Lessons are kept per seat and per role, so Villager play never reads Mafia lessons."""
-        return self.memory_root / self.seats[p] / self.roles[p]
+        return self.memory_root / p / self.roles[p]
 
     def emit(self, event_type, public=False, **payload):
         event = dict(event_id=f"evt_{len(self.events)+1:05}", game_id=self.id, type=event_type,
@@ -118,13 +123,15 @@ class Game:
 
     async def task(self, p, kind, payload, validator=None):
         request = self.envelope(p, kind, payload)
-        timeout = 30
+        timeout = self.request_timeout
         if payload.get("deadline_at"):
             timeout = max(0, (datetime.fromisoformat(payload["deadline_at"]) - now()).total_seconds())
         try:
             result_kind, result_payload = await asyncio.wait_for(self.agents[p].handle(request, self.memories[p]), timeout)
             response = self.envelope(p, result_kind, result_payload, request.message_id)
         except CodexProviderError as error:
+            if self.strict_training and error.code == "CODEX_INIT_FAILED":
+                raise
             response = self.envelope(p, "request_failed", {
                 "request_type": kind, "error": {"code": error.code, "retryable": True},
             }, request.message_id)
@@ -141,6 +148,8 @@ class Game:
         return response
 
     async def pause_point(self):
+        if self.strict_training and getattr(self.model, "quota_exhausted", False):
+            raise CodexProviderError("USAGE_LIMIT_REACHED")
         await self.paused.wait()
         if self.config.delay:
             await asyncio.sleep(self.config.delay)
@@ -201,7 +210,7 @@ class Game:
             observation_id=uuid.uuid4().hex, window_id=window, phase=self.phase, day=self.day,
             discussion_round=self.round, allowed_actions=allowed, legal_targets=targets,
             remaining_speeches_today=4-self.round if self.round else 0,
-            deadline_at=(now()+timedelta(seconds=30)).isoformat(),
+            deadline_at=(now()+timedelta(seconds=self.request_timeout)).isoformat(),
             observation=self.observation(p, history), summary_enabled=self.config.showcase,
         )
         for attempt in range(3):
@@ -409,7 +418,7 @@ class Game:
 
     async def reflect(self, p):
         request = dict(source_game_id=self.id, expected_memory_version=self.versions[p],
-                       update_window_id=f"{self.id}:memory", deadline_at=(now()+timedelta(seconds=30)).isoformat(),
+                       update_window_id=f"{self.id}:memory", deadline_at=(now()+timedelta(seconds=self.request_timeout)).isoformat(),
                        current_memory=self.memories[p].model_dump(),
                        feedback=dict(own_role=self.roles[p], team_result=self.team_result(p),
                                      public_events=self.history, own_private_results=self.facts[p],
@@ -424,8 +433,9 @@ class Game:
             revision = Memory.model_validate({
                 k: response.payload[k] for k in ("generalized_memory", "opponent_impressions")
             })
-            # Opponent impressions are not carried between games (see __init__); keep general lessons.
-            revision.opponent_impressions = []
+            ids = [entry.agent_id for entry in revision.opponent_impressions]
+            if len(set(ids)) != len(ids) or not set(ids) <= set(request["requirements"]["opponent_ids"]):
+                raise ValueError("INVALID_MEMORY_SCHEMA")
             markdown = revision.markdown()
             if len(markdown.encode()) > 16384:
                 raise ValueError("MEMORY_TOO_LARGE")
@@ -477,6 +487,8 @@ class Game:
                     break
                 if self.config.notebook:
                     await self.write_notebooks()
+            if self.strict_training and getattr(self.model, "quota_exhausted", False):
+                raise CodexProviderError("USAGE_LIMIT_REACHED")
             self.phase = "game_over"
             reason = ("all_mafia_eliminated" if self.winner == "villagers"
                       else "mafia_parity" if self.winner == "mafia" else "day_limit")
@@ -488,7 +500,13 @@ class Game:
                     "team_result": self.team_result(p), "final_public_event_id": final["event_id"], "role_disclosures": [],
                 })
             self.phase = "memory_update"
-            await asyncio.gather(*(self.reflect(p) for p in self.learning))
+            if self.strict_training and any(event["type"] == "action_defaulted" for event in self.events):
+                self.emit("training_game_excluded", reason="defaulted_actions")
+            else:
+                await asyncio.gather(*(self.reflect(p) for p in self.learning))
+        except CodexProviderError as error:
+            self.emit("training_stopped", True, reason=error.code)
+            raise
         except asyncio.CancelledError:
             self.emit("game_cancelled", True)
             raise
